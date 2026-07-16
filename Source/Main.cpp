@@ -11062,9 +11062,14 @@ private:
 
     void updateProjectPresentation()
     {
+#if JUCE_MAC
+        if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+            window->setName ({});
+#else
         const auto name = currentProjectFile == juce::File() ? "Untitled" : currentProjectFile.getFileNameWithoutExtension();
         if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
             window->setName ("Blendings - " + name + (projectDirty ? " *" : ""));
+#endif
     }
 
     void closeElementWindows()
@@ -11230,6 +11235,9 @@ private:
         {
             setUsingNativeTitleBar (true);
             setContentOwned (new MainComponent(), true);
+#if JUCE_MAC
+            setName ({});
+#endif
             setResizable (true, true);
             fitToScreen();
             setVisible (true);
