@@ -10876,6 +10876,54 @@ private:
     }
 };
 
+static void triggerCarouselTone (ScDiscAudioEngine& audio, const CarouselDocument::Item& tone)
+{
+    if (tone.playback == CarouselDocument::PlaybackType::synth)
+    {
+        audio.triggerMidiNote (tone.midi);
+        return;
+    }
+
+    DiscAudioTrigger trigger;
+    trigger.midiNote = tone.midi;
+    trigger.gain = 0.82f;
+    if (tone.playback == CarouselDocument::PlaybackType::superCollider)
+    {
+        trigger.scCode = tone.scCode;
+        trigger.scDurationSeconds = tone.durationSeconds;
+    }
+    else
+    {
+        trigger.pdPatch = tone.pdPatch;
+        trigger.pdDurationSeconds = tone.durationSeconds;
+    }
+    audio.trigger (trigger);
+}
+
+static void triggerPipeWorldDisc (ScDiscAudioEngine& audio, const otherware::PipeWorkspaceDiscTrigger& disc)
+{
+    if (disc.playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::synth)
+    {
+        audio.triggerMidiNote (disc.midiNote);
+        return;
+    }
+
+    DiscAudioTrigger trigger;
+    trigger.midiNote = disc.midiNote;
+    trigger.gain = 0.82f;
+    if (disc.playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider)
+    {
+        trigger.scCode = disc.source;
+        trigger.scDurationSeconds = disc.durationSeconds;
+    }
+    else
+    {
+        trigger.pdPatch = disc.source;
+        trigger.pdDurationSeconds = disc.durationSeconds;
+    }
+    audio.trigger (trigger);
+}
+
 class CarouselEditorPanel final : public juce::Component
 {
 public:
@@ -10889,7 +10937,7 @@ public:
         {
             if (canvas.setDiscCarousel (handle, index, document) && onChange) onChange();
         };
-        editor.onNote = [&audio] (int midi) { audio.triggerMidiNote (midi); };
+        editor.onTone = [&audio] (const CarouselDocument::Item& tone) { triggerCarouselTone (audio, tone); };
     }
     ~CarouselEditorPanel() override { editor.setRunning (false); }
     void resized() override { editor.setBounds (getLocalBounds()); }
@@ -12807,7 +12855,7 @@ private:
             carouselRuntimes.clear();
             auto runtime = std::make_unique<CarouselEditorComponent>();
             runtime->setDocument (chain.carousels[static_cast<size_t> (index)]);
-            runtime->onNote = [this] (int midi) { scAudio.triggerMidiNote (midi); };
+            runtime->onTone = [this] (const CarouselDocument::Item& tone) { triggerCarouselTone (scAudio, tone); };
             runtime->setRunning (true);
             carouselRuntimes.push_back (std::move (runtime));
             return std::numeric_limits<double>::infinity();
@@ -12817,6 +12865,7 @@ private:
         {
             pipeRuntimes.clear();
             auto runtime = otherware::createPipeWorkspaceComponent();
+            otherware::setPipeWorkspaceDiscTriggerCallback (*runtime, [this] (const auto& disc) { triggerPipeWorldDisc (scAudio, disc); });
             otherware::setPipeWorkspaceTempo (*runtime, globalTempoBpm);
             const auto& stateText = chain.pipeStates[static_cast<size_t> (index)];
             if (stateText.isNotEmpty()) otherware::applyPipeWorkspaceState (*runtime, juce::JSON::parse (stateText));
@@ -13574,7 +13623,7 @@ private:
         { if (safeThis != nullptr) { safeThis->refreshDataPane(); safeThis->updateStatus(); } });
         carouselPanel = panel;
         carouselWindow = std::make_unique<FloatingEditorWindow> ("Disc Carousel", panel, this, 1040, 700, [safeThis]
-        { if (safeThis != nullptr) { safeThis->carouselPanel = nullptr; safeThis->carouselWindow = nullptr; } });
+        { if (safeThis != nullptr) { safeThis->stopPreviewAudio(); safeThis->carouselPanel = nullptr; safeThis->carouselWindow = nullptr; } });
         carouselWindow->setResizeLimits (1040, 560, 2200, 1600);
     }
 
@@ -13638,6 +13687,10 @@ private:
         pipeElementComponent = workspace.get();
         pipeElementHandle = handle;
         pipeElementIndex = index;
+        otherware::setPipeWorkspaceDiscTriggerCallback (*pipeElementComponent, [safeThis = juce::Component::SafePointer<MainComponent> (this)] (const auto& disc)
+        {
+            if (safeThis != nullptr) triggerPipeWorldDisc (safeThis->scAudio, disc);
+        });
         otherware::setPipeWorkspaceTempo (*pipeElementComponent, globalTempoBpm);
         const auto savedState = canvas.getDiscPipeWorld (handle, index);
         if (savedState.isNotEmpty()) otherware::applyPipeWorkspaceState (*pipeElementComponent, juce::JSON::parse (savedState));
@@ -13793,7 +13846,7 @@ private:
             if (! shouldFire[triggers.size() + i]) continue;
             auto runtime = std::make_unique<CarouselEditorComponent>();
             runtime->setDocument (carouselDocuments[i]);
-            runtime->onNote = [this] (int midi) { scAudio.triggerMidiNote (midi); };
+            runtime->onTone = [this] (const CarouselDocument::Item& tone) { triggerCarouselTone (scAudio, tone); };
             runtime->setRunning (true);
             carouselRuntimes.push_back (std::move (runtime));
         }
@@ -13804,6 +13857,7 @@ private:
             if (! shouldFire[triggers.size() + carouselDocuments.size() + i]) continue;
             const auto& stateText = pipeStates[i];
             auto runtime = otherware::createPipeWorkspaceComponent();
+            otherware::setPipeWorkspaceDiscTriggerCallback (*runtime, [this] (const auto& disc) { triggerPipeWorldDisc (scAudio, disc); });
             otherware::setPipeWorkspaceTempo (*runtime, globalTempoBpm);
             if (stateText.isNotEmpty()) otherware::applyPipeWorkspaceState (*runtime, juce::JSON::parse (stateText));
             otherware::setPipeWorkspaceRunning (*runtime, true);

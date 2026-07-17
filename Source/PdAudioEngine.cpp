@@ -536,7 +536,7 @@ void PdAudioEngine::renderAndAdd (juce::AudioBuffer<float>& output, const juce::
 #endif
 }
 
-bool PdAudioEngine::triggerPatch (const juce::String& patch, float durationSeconds, const juce::String& searchPath)
+bool PdAudioEngine::triggerPatch (const juce::String& patch, float durationSeconds, const juce::String& searchPath, float triggerValue)
 {
     const auto trimmed = patch.trim();
     const auto trimmedSearchPath = searchPath.trim();
@@ -559,10 +559,13 @@ bool PdAudioEngine::triggerPatch (const juce::String& patch, float durationSecon
 #if OTHERWARE_HAS_LIBPD
     // Some valid Pd patches are loadbang-driven and do not expose the synthetic
     // trigger receiver. Loading them successfully is enough; bang when possible.
-    juce::ignoreUnused (libpd_bang (loadedPatch->receiver.toRawUTF8()));
+    if (triggerValue >= 0.0f)
+        juce::ignoreUnused (libpd_float (loadedPatch->receiver.toRawUTF8(), triggerValue));
+    else
+        juce::ignoreUnused (libpd_bang (loadedPatch->receiver.toRawUTF8()));
     return true;
 #else
-    juce::ignoreUnused (durationSeconds);
+    juce::ignoreUnused (durationSeconds, triggerValue);
     return false;
 #endif
 }

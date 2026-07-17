@@ -10,6 +10,7 @@
 struct CarouselDocument
 {
     enum class ItemType { tone, orbit, post };
+    enum class PlaybackType { synth = 0, superCollider, pureData };
     struct Item
     {
         int id = 0;
@@ -18,6 +19,10 @@ struct CarouselDocument
         int midi = 60, voice = 0, ownerOrbit = -1;
         float radius = 1.0f, speed = 0.25f, phase = 0.0f;
         bool euclidean = false;
+        PlaybackType playback = PlaybackType::synth;
+        float durationSeconds = 1.0f;
+        juce::String scCode;
+        juce::String pdPatch;
     };
 
     int columns = 12, rows = 8, nextId = 20;
@@ -41,7 +46,7 @@ public:
     void setRunning (bool);
     [[nodiscard]] bool isRunning() const noexcept { return running; }
     std::function<void(const CarouselDocument&)> onChange;
-    std::function<void(int)> onNote;
+    std::function<void(const CarouselDocument::Item&)> onTone;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -64,10 +69,13 @@ private:
 
     juce::TextButton selectButton { "select" }, toneButton { "tone" }, orbitButton { "orbit" }, postButton { "post" };
     juce::TextButton playButton { "play" }, clearButton { "clear all" }, deleteButton { "delete" }, fitButton { "fit" };
-    juce::Slider bpmSlider, pitchSlider, speedSlider, radiusSlider, countSlider;
-    juce::ComboBox columnsBox, rowsBox;
+    juce::TextButton resetCodeButton { "Reset template" };
+    juce::Slider bpmSlider, pitchSlider, durationSlider, speedSlider, radiusSlider, countSlider;
+    juce::ComboBox columnsBox, rowsBox, playbackBox;
+    juce::TextEditor codeEditor;
     juce::ToggleButton euclideanButton { "Euclidean spacing" };
-    juce::Label titleLabel, detailLabel, globalLabel, selectionLabel, bpmLabel, columnsLabel, rowsLabel, pitchLabel, speedLabel, radiusLabel, countLabel;
+    juce::Label titleLabel, detailLabel, globalLabel, selectionLabel, bpmLabel, columnsLabel, rowsLabel,
+                pitchLabel, playbackLabel, durationLabel, codeLabel, speedLabel, radiusLabel, countLabel;
 
     void timerCallback() override;
     void changed();
@@ -79,6 +87,8 @@ private:
     void arrangeOrbit (int orbitId);
     int orbitToneCount (int orbitId) const;
     void setOrbitToneCount (int count);
+    void triggerTone (const CarouselDocument::Item&);
+    void resetSelectedToneCode();
     float cellSize() const;
     juce::Rectangle<float> fieldViewport() const;
     juce::Rectangle<float> gridBounds() const;

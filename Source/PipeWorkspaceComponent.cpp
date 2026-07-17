@@ -160,7 +160,10 @@ struct Valve
 
     IVec3 position;
     int midiNote = 60;
+    otherware::PipeWorkspaceDiscTrigger::PlaybackType playback = otherware::PipeWorkspaceDiscTrigger::PlaybackType::synth;
+    float durationSeconds = 0.45f;
     juce::String scProgram;
+    juce::String pdPatch;
     juce::String scSynthName;
     bool scProgramLoaded = false;
 };
@@ -845,6 +848,14 @@ public:
         scaleBox.addListener (this);
         addAndMakeVisible (scaleBox);
 
+        playbackBox.addItem ("Synth", 1);
+        playbackBox.addItem ("SuperCollider", 2);
+        playbackBox.addItem ("Pure Data", 3);
+        playbackBox.setSelectedId (1, juce::dontSendNotification);
+        playbackBox.addListener (this);
+        playbackBox.setTooltip ("Choose what this Pipe World disc plays");
+        addAndMakeVisible (playbackBox);
+
         scCodeDocument.replaceAllContent (defaultScProgram());
         scCodeEditor = std::make_unique<juce::CodeEditorComponent> (scCodeDocument, &scTokeniser);
         configureScCodeEditor (*scCodeEditor);
@@ -858,6 +869,8 @@ public:
         setupSlider (tempoSlider, 40.0, 220.0, 1.0, 120.0);
         tempoSlider.setVisible (false);
         setupSlider (noteSlider, 24.0, 96.0, 1.0, 60.0);
+        setupSlider (durationSlider, 0.05, 30.0, 0.05, 0.45);
+        durationSlider.setTooltip ("One-shot duration in seconds");
 
         setupButton (selectButton, "SELECT", "Inspect cells without changing the pipework");
         setupButton (pipeButton, "PIPE", "Draw connected pipe paths");
@@ -974,6 +987,10 @@ public:
     }
     void setWorkspaceRunning (bool running) { setPlaying (running); }
     void setWorkspaceChangeCallback (std::function<void()> callback) { onWorkspaceChanged = std::move (callback); }
+    void setDiscTriggerCallback (std::function<void(const otherware::PipeWorkspaceDiscTrigger&)> callback)
+    {
+        onDiscTriggered = std::move (callback);
+    }
 
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
     {
@@ -1166,6 +1183,10 @@ public:
         noteSlider.setSliderStyle (juce::Slider::LinearHorizontal);
         noteSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 24);
         noteSlider.setBounds (pitchArea);
+        playbackBox.setBounds (pitchArea.withY (pitchArea.getBottom() + 8).withHeight (34));
+        durationSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+        durationSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 24);
+        durationSlider.setBounds (playbackBox.getBounds().withY (playbackBox.getBottom() + 8).withHeight (38));
 
         if (scMode)
         {
@@ -1469,10 +1490,12 @@ private:
     juce::ComboBox faceBox;
     juce::ComboBox keyBox;
     juce::ComboBox scaleBox;
+    juce::ComboBox playbackBox;
     std::array<juce::TextButton, 6> faceButtons;
     juce::Slider layerSlider;
     juce::Slider tempoSlider;
     juce::Slider noteSlider;
+    juce::Slider durationSlider;
     juce::TextButton selectButton;
     juce::TextButton pipeButton;
     juce::TextButton tapButton;
@@ -1532,6 +1555,7 @@ private:
     std::vector<PipeNetwork> redoStack;
     bool updatingNoteSlider = false;
     std::function<void()> onWorkspaceChanged;
+    std::function<void(const otherware::PipeWorkspaceDiscTrigger&)> onDiscTriggered;
 
     static constexpr int savePatchMenuId = 9001;
     static constexpr int loadPatchMenuId = 9002;
@@ -1617,7 +1641,10 @@ private:
             object->setProperty ("y", valve.position.y);
             object->setProperty ("z", valve.position.z);
             object->setProperty ("note", valve.midiNote);
+            object->setProperty ("playback", (int) valve.playback);
+            object->setProperty ("duration", valve.durationSeconds);
             object->setProperty ("scProgram", scProgramForValve (valve));
+            object->setProperty ("pdPatch", valve.pdPatch);
             valveArray.add (object);
         }
         root->setProperty ("valves", valveArray);
@@ -1656,9 +1683,16 @@ private:
             for (const auto& item : *valves)
             {
                 if (const auto point = pointFromVar (item))
-                    loaded.valves.push_back ({ *point,
-                                               juce::jlimit (24, 96, (int) item.getProperty ("note", defaultValveNoteFor (*point))),
-                                               item.getProperty ("scProgram", fallbackScProgram).toString() });
+                {
+                    Valve valve { *point,
+                                  juce::jlimit (24, 96, (int) item.getProperty ("note", defaultValveNoteFor (*point))),
+                                  item.getProperty ("scProgram", fallbackScProgram).toString() };
+                    valve.playback = static_cast<otherware::PipeWorkspaceDiscTrigger::PlaybackType> (
+                        juce::jlimit (0, 2, (int) item.getProperty ("playback", 0)));
+                    valve.durationSeconds = juce::jlimit (0.05f, 9999.0f, (float) item.getProperty ("duration", 0.45f));
+                    valve.pdPatch = item.getProperty ("pdPatch", defaultPdPatch()).toString();
+                    loaded.valves.push_back (std::move (valve));
+                }
             }
         }
 
@@ -1771,7 +1805,11 @@ private:
         if (auto* valve = valveForScEditor())
         {
             const auto text = getScProgramText();
-            if (valve->scProgram != text)
+            if (valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::pureData)
+            {
+                valve->pdPatch = text;
+            }
+            else if (valve->scProgram != text)
             {
                 valve->scProgram = text;
                 valve->scProgramLoaded = false;
@@ -1786,7 +1824,10 @@ private:
         if (auto* valve = selectedValve())
         {
             scEditorValve = valve->position;
-            scCodeDocument.replaceAllContent (scProgramForValve (*valve));
+            scCodeDocument.replaceAllContent (
+                valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::pureData
+                    ? (valve->pdPatch.isNotEmpty() ? valve->pdPatch : defaultPdPatch())
+                    : scProgramForValve (*valve));
         }
         else
         {
@@ -2143,6 +2184,27 @@ private:
 )SC";
     }
 
+    static juce::String defaultPdPatch()
+    {
+        return R"PD(#N canvas 120 120 520 360 12;
+#X obj 32 30 r trigger;
+#X obj 32 66 mtof;
+#X obj 32 102 osc~;
+#X obj 160 102 vline~;
+#X msg 160 66 0.18 5 \, 0 320 8;
+#X obj 32 142 *~;
+#X obj 32 182 dac~;
+#X connect 0 0 1 0;
+#X connect 0 0 4 0;
+#X connect 1 0 2 0;
+#X connect 2 0 5 0;
+#X connect 4 0 3 0;
+#X connect 3 0 5 1;
+#X connect 5 0 6 0;
+#X connect 5 0 6 1;
+)PD";
+    }
+
     static juce::CodeEditorComponent::ColourScheme makeScEditorColourScheme()
     {
         juce::CodeEditorComponent::ColourScheme scheme;
@@ -2230,21 +2292,25 @@ private:
 
     void updateSoundModeControls()
     {
-        const auto isSc = soundMode == SoundMode::superCollider;
+        const auto* valve = selectedValve();
+        const auto isSource = soundMode == SoundMode::superCollider
+                           && valve != nullptr
+                           && valve->playback != otherware::PipeWorkspaceDiscTrigger::PlaybackType::synth;
+        const auto isSc = isSource && valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider;
         if (scCodeEditor != nullptr)
-            scCodeEditor->setVisible (isSc);
+            scCodeEditor->setVisible (isSource);
         compileScButton.setVisible (isSc);
         resetScButton.setVisible (isSc);
         loadScButton.setVisible (isSc);
         saveScButton.setVisible (isSc);
 
         for (auto& button : faceButtons)
-            button.setVisible (! isSc);
+            button.setVisible (! isSource);
 
-        layerSlider.setVisible (! isSc);
+        layerSlider.setVisible (! isSource);
         updateInspectorControls();
 
-        if (isSc && scEngine.isReady())
+        if (isSource)
             showScProgramForSelection();
 
         resized();
@@ -2326,14 +2392,20 @@ private:
     void updateInspectorControls()
     {
         const auto hasValve = selectedValve() != nullptr;
-        const auto showValveControls = hasValve && soundMode != SoundMode::superCollider;
+        const auto showValveControls = hasValve;
         noteDownButton.setVisible (showValveControls);
         noteUpButton.setVisible (showValveControls);
         noteSlider.setVisible (showValveControls);
+        playbackBox.setVisible (showValveControls);
+        durationSlider.setVisible (showValveControls);
 
         updatingNoteSlider = true;
         if (const auto* valve = selectedValve())
+        {
             noteSlider.setValue (valve->midiNote, juce::dontSendNotification);
+            playbackBox.setSelectedItemIndex ((int) valve->playback, juce::dontSendNotification);
+            durationSlider.setValue (valve->durationSeconds, juce::dontSendNotification);
+        }
         updatingNoteSlider = false;
     }
 
@@ -2792,6 +2864,19 @@ private:
         event.level = juce::jlimit (0.025, 0.12, (0.052 + exits * 0.008 + (flow.falling ? 0.026 : 0.0)) * (double) flow.accent);
         event.brightness = juce::jlimit (0.06, 0.42, 0.10 + height * 0.16 + travelEnergy * 0.08 + (flow.falling ? 0.10 : 0.0) + (1.0 - (double) flow.accent) * 0.08);
         event.pan = juce::jlimit (-0.85, 0.85, ((double) voxel.x / (double) (gridSize - 1)) * 1.7 - 0.85);
+
+        if (valve != nullptr && onDiscTriggered != nullptr)
+        {
+            otherware::PipeWorkspaceDiscTrigger trigger;
+            trigger.playback = valve->playback;
+            trigger.midiNote = midiNote;
+            trigger.durationSeconds = valve->durationSeconds;
+            trigger.source = valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider
+                                ? scProgramForValve (*valve)
+                                : valve->pdPatch;
+            onDiscTriggered (trigger);
+            return;
+        }
 
         if (soundMode == SoundMode::superCollider && scEngine.isReady() && valve != nullptr && ensureValveScProgram (*valve))
         {
@@ -3683,6 +3768,15 @@ private:
         {
             setSelectedValveNote ((int) std::round (noteSlider.getValue()));
         }
+        else if (slider == &durationSlider)
+        {
+            if (auto* valve = selectedValve())
+            {
+                beginChange();
+                valve->durationSeconds = (float) durationSlider.getValue();
+                setStatus ("Disc duration " + juce::String (valve->durationSeconds, 2) + " s");
+            }
+        }
     }
 
     void comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged) override
@@ -3704,6 +3798,25 @@ private:
             updateInspectorControls();
             setStatus ("Scale " + scaleNameForIndex (scaleIndex));
             repaint();
+        }
+        else if (comboBoxThatHasChanged == &playbackBox)
+        {
+            if (auto* valve = selectedValve())
+            {
+                beginChange();
+                storeScEditorToValve();
+                valve->playback = static_cast<otherware::PipeWorkspaceDiscTrigger::PlaybackType> (
+                    juce::jlimit (0, 2, playbackBox.getSelectedItemIndex()));
+                if (valve->pdPatch.isEmpty()) valve->pdPatch = defaultPdPatch();
+                if (valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::synth)
+                    setSoundMode (SoundMode::internal);
+                else
+                    setSoundMode (SoundMode::superCollider);
+                showScProgramForSelection();
+                updateSoundModeControls();
+                setStatus ("Disc playback: " + playbackBox.getText());
+                repaint();
+            }
         }
     }
 };
@@ -3747,5 +3860,12 @@ void setPipeWorkspaceChangeCallback (juce::Component& component, std::function<v
 {
     if (auto* workspace = dynamic_cast<PipeWorkspaceComponent*> (&component))
         workspace->setWorkspaceChangeCallback (std::move (callback));
+}
+
+void setPipeWorkspaceDiscTriggerCallback (juce::Component& component,
+                                          std::function<void(const PipeWorkspaceDiscTrigger&)> callback)
+{
+    if (auto* workspace = dynamic_cast<PipeWorkspaceComponent*> (&component))
+        workspace->setDiscTriggerCallback (std::move (callback));
 }
 } // namespace otherware

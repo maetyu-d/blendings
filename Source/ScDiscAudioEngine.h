@@ -30,6 +30,7 @@ struct DiscAudioTrigger
     bool hasOrcaGrid = false;
     float gain = 1.0f;
     float pan = 0.0f;
+    int midiNote = -1;
 
     [[nodiscard]] bool hasScCode() const noexcept { return scCode.trim().isNotEmpty(); }
     [[nodiscard]] bool hasPdPatch() const noexcept { return pdPatch.trim().isNotEmpty(); }

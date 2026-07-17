@@ -24,7 +24,7 @@ public:
     bool prepare (double sampleRate, int maximumBlockSize, int outputChannels, int inputChannels = 0);
     void release() noexcept;
     void renderAndAdd (juce::AudioBuffer<float>& output, const juce::AudioBuffer<float>* input = nullptr);
-    bool triggerPatch (const juce::String& patch, float durationSeconds, const juce::String& searchPath = {});
+    bool triggerPatch (const juce::String& patch, float durationSeconds, const juce::String& searchPath = {}, float triggerValue = -1.0f);
     bool sendGuiValue (const juce::String& patch, const juce::String& receiver, float value, bool bangOnly, float durationSeconds, const juce::String& searchPath = {});
     bool sendMessage (const juce::String& patch, const juce::String& receiver, const juce::String& selector, const juce::StringArray& atoms, float durationSeconds, const juce::String& searchPath = {});
     bool sendMidiMessage (const juce::MidiMessage& message, int port = 0);

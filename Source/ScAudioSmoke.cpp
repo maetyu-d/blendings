@@ -162,6 +162,7 @@ int main()
     DiscAudioTrigger scCodeTrigger;
     scCodeTrigger.depth = 1;
     scCodeTrigger.branchIndex = 2;
+    scCodeTrigger.midiNote = 64;
     scCodeTrigger.scDurationSeconds = -1.0f;
     scCodeTrigger.scCode =
         "var hold = Select.kr(sustain < 0, [sustain.max(0.25), 1.0]);\n"
@@ -173,6 +174,7 @@ int main()
     DiscAudioTrigger pdTrigger;
     pdTrigger.depth = 1;
     pdTrigger.branchIndex = 5;
+    pdTrigger.midiNote = 69;
     pdTrigger.pdDurationSeconds = 0.45f;
     pdTrigger.pdPatch =
         "#N canvas 120 120 520 360 10;\n"

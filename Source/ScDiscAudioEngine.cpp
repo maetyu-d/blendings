@@ -16,6 +16,9 @@ const juce::StringArray soundPalette { "pluck", "bell", "fm", "grain", "string",
 
 int noteFor (const DiscAudioTrigger& trigger, int elementIndex) noexcept
 {
+    if (trigger.midiNote >= 0)
+        return juce::jlimit (0, 127, trigger.midiNote);
+
     const auto base = 48 + trigger.depth * 7 + (trigger.branchIndex % 5) * 2;
     const int degrees[] { 0, 2, 4, 7, 9, 12, 14, 16 };
     return juce::jlimit (28, 96, base + degrees[static_cast<size_t> (elementIndex % 8)]);
@@ -455,7 +458,8 @@ void ScDiscAudioEngine::triggerMany (const std::vector<DiscAudioTrigger>& trigge
 
         if (triggerToPlay.hasPdPatch())
         {
-            if (pdAudio.triggerPatch (triggerToPlay.pdPatch, triggerToPlay.pdDurationSeconds, triggerToPlay.pdSearchPath))
+            if (pdAudio.triggerPatch (triggerToPlay.pdPatch, triggerToPlay.pdDurationSeconds, triggerToPlay.pdSearchPath,
+                                      static_cast<float> (triggerToPlay.midiNote)))
                 scheduledSequence = true;
             else if (synthForPdPatch (triggerToPlay.pdPatch).isNotEmpty())
                 events.push_back (makePdPatchEvent (triggerToPlay));
@@ -854,7 +858,8 @@ gridcollider::InternalEvent ScDiscAudioEngine::makeScProgramEvent (const DiscAud
     fields.sourceCell = { juce::jlimit (0, 63, 18 + triggerToPlay.branchIndex * 3),
                           juce::jlimit (0, 63, 12 + triggerToPlay.depth * 8) };
     fields.instrumentName = synthForProgram (triggerToPlay.scCode);
-    fields.pitch = noteFor (triggerToPlay, 0) + 12;
+    fields.pitch = triggerToPlay.midiNote >= 0 ? noteFor (triggerToPlay, 0)
+                                               : noteFor (triggerToPlay, 0) + 12;
     fields.velocity = 0.68f * triggerToPlay.gain;
     fields.durationTicks = ticksForSeconds (triggerToPlay.scDurationSeconds);
     fields.parameters["fold"] = "0.880";
@@ -880,7 +885,8 @@ gridcollider::InternalEvent ScDiscAudioEngine::makePdPatchEvent (const DiscAudio
     fields.sourceCell = { juce::jlimit (0, 63, 20 + triggerToPlay.branchIndex * 3),
                           juce::jlimit (0, 63, 16 + triggerToPlay.depth * 8) };
     fields.instrumentName = synthForPdPatch (triggerToPlay.pdPatch);
-    fields.pitch = noteFor (triggerToPlay, 1) + 7;
+    fields.pitch = triggerToPlay.midiNote >= 0 ? noteFor (triggerToPlay, 1)
+                                               : noteFor (triggerToPlay, 1) + 7;
     fields.velocity = 0.74f * triggerToPlay.gain;
     fields.durationTicks = ticksForSeconds (triggerToPlay.pdDurationSeconds);
     fields.parameters["velocity"] = juce::String (fields.velocity, 3);
