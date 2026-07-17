@@ -46,39 +46,48 @@ juce::File bundledPdExtraRoot()
     return juce::File (juce::String (OTHERWARE_PD_EXTRA_ROOT).unquoted());
 }
 
-juce::Colour appBackground()     { return juce::Colour (0xff0d100f); }
-juce::Colour surfaceColour()     { return juce::Colour (0xff161a18); }
-juce::Colour raisedSurface()     { return juce::Colour (0xff232725); }
-juce::Colour subtleStroke()      { return juce::Colour (0xff363b38); }
-juce::Colour textPrimary()       { return juce::Colour (0xfff2f2f2); }
-juce::Colour textMuted()         { return juce::Colour (0xff989d9a); }
-juce::Colour backgroundTop()     { return juce::Colour (0xff101a16); }
-juce::Colour backgroundBottom()  { return juce::Colour (0xff0d1411); }
-juce::Colour gridMajorColour()   { return juce::Colour (0x204c7a6f); }
-juce::Colour gridMinorColour()   { return juce::Colour (0x103f6a60); }
-juce::Colour lineColour()        { return juce::Colour (0xff65f0d0); }
-juce::Colour lineDeepColour()    { return juce::Colour (0xff176175); }
-juce::Colour lineLightColour()   { return juce::Colour (0xfffff0a6); }
-juce::Colour discColour()        { return juce::Colour (0xffffa45f); }
-juce::Colour discHotColour()     { return juce::Colour (0xffffd66e); }
-juce::Colour discCoolColour()    { return juce::Colour (0xffc45cff); }
-juce::Colour discRimColour()     { return juce::Colour (0xff70f5d5); }
-juce::Colour soundElementColour(){ return juce::Colour (0xfff2d279); }
-juce::Colour worldElementColour(){ return juce::Colour (0xff34c7ff); }
-juce::Colour scCodeElementColour(){ return juce::Colour (0xffb9ff5d); }
-juce::Colour scSheetElementColour(){ return juce::Colour (0xffff5fb7); }
-juce::Colour orcaGridElementColour(){ return juce::Colour (0xff9b7cff); }
-juce::Colour pdPatchElementColour(){ return juce::Colour (0xffff744f); }
-juce::Colour carouselElementColour(){ return juce::Colour (0xffffc857); }
-juce::Colour pipeElementColour()    { return juce::Colour (0xff42e8c2); }
-juce::Colour accentColour()      { return juce::Colour (0xff0a84ff); }
+bool rainbowUiEnabled = false;
+void setRainbowUiEnabled (bool enabled) { rainbowUiEnabled = enabled; }
+bool isRainbowUiEnabled() noexcept { return rainbowUiEnabled; }
+
+juce::Colour appBackground()     { return rainbowUiEnabled ? juce::Colour (0xfff5f7fb) : juce::Colour (0xff0d100f); }
+juce::Colour surfaceColour()     { return rainbowUiEnabled ? juce::Colour (0xffffffff) : juce::Colour (0xff161a18); }
+juce::Colour raisedSurface()     { return rainbowUiEnabled ? juce::Colour (0xffe9edf5) : juce::Colour (0xff232725); }
+juce::Colour subtleStroke()      { return rainbowUiEnabled ? juce::Colour (0xff9ba6bc) : juce::Colour (0xff363b38); }
+juce::Colour textPrimary()       { return rainbowUiEnabled ? juce::Colour (0xff101522) : juce::Colour (0xfff2f2f2); }
+juce::Colour textMuted()         { return rainbowUiEnabled ? juce::Colour (0xff566077) : juce::Colour (0xff989d9a); }
+juce::Colour backgroundTop()     { return rainbowUiEnabled ? juce::Colour (0xffffffff) : juce::Colour (0xff101a16); }
+juce::Colour backgroundBottom()  { return rainbowUiEnabled ? juce::Colour (0xffedf1f7) : juce::Colour (0xff0d1411); }
+juce::Colour gridMajorColour()   { return rainbowUiEnabled ? juce::Colour (0x425200ff) : juce::Colour (0x204c7a6f); }
+juce::Colour gridMinorColour()   { return rainbowUiEnabled ? juce::Colour (0x1f006cff) : juce::Colour (0x103f6a60); }
+juce::Colour lineColour()        { return rainbowUiEnabled ? juce::Colour (0xff00d6b2) : juce::Colour (0xff65f0d0); }
+juce::Colour lineDeepColour()    { return rainbowUiEnabled ? juce::Colour (0xff1746ff) : juce::Colour (0xff176175); }
+juce::Colour lineLightColour()   { return rainbowUiEnabled ? juce::Colour (0xffffe000) : juce::Colour (0xfffff0a6); }
+juce::Colour discColour()        { return rainbowUiEnabled ? juce::Colour (0xffff3d00) : juce::Colour (0xffffa45f); }
+juce::Colour discHotColour()     { return rainbowUiEnabled ? juce::Colour (0xffffd600) : juce::Colour (0xffffd66e); }
+juce::Colour discCoolColour()    { return rainbowUiEnabled ? juce::Colour (0xff9c00ff) : juce::Colour (0xffc45cff); }
+juce::Colour discRimColour()     { return rainbowUiEnabled ? juce::Colour (0xff00c8a0) : juce::Colour (0xff70f5d5); }
+juce::Colour soundElementColour(){ return rainbowUiEnabled ? juce::Colour (0xffffc400) : juce::Colour (0xfff2d279); }
+juce::Colour worldElementColour(){ return rainbowUiEnabled ? juce::Colour (0xff009dff) : juce::Colour (0xff34c7ff); }
+juce::Colour scCodeElementColour(){ return rainbowUiEnabled ? juce::Colour (0xff63d900) : juce::Colour (0xffb9ff5d); }
+juce::Colour scSheetElementColour(){ return rainbowUiEnabled ? juce::Colour (0xffff008a) : juce::Colour (0xffff5fb7); }
+juce::Colour orcaGridElementColour(){ return rainbowUiEnabled ? juce::Colour (0xff6c35ff) : juce::Colour (0xff9b7cff); }
+juce::Colour pdPatchElementColour(){ return rainbowUiEnabled ? juce::Colour (0xffff4b18) : juce::Colour (0xffff744f); }
+juce::Colour carouselElementColour(){ return rainbowUiEnabled ? juce::Colour (0xffff9d00) : juce::Colour (0xffffc857); }
+juce::Colour pipeElementColour()    { return rainbowUiEnabled ? juce::Colour (0xff00bf9a) : juce::Colour (0xff42e8c2); }
+juce::Colour accentColour()      { return rainbowUiEnabled ? juce::Colour (0xff1746ff) : juce::Colour (0xff0a84ff); }
 
 juce::Colour pipeColourForIndex (int index)
 {
-    static constexpr std::array<uint32_t, 7> colours {{
+    static constexpr std::array<uint32_t, 7> darkColours {{
         0xffff7aa8, 0xffff9d72, 0xffffdd6d, 0xff8ef6a3,
         0xff58d8ff, 0xff9aa7ff, 0xffd58cff
     }};
+    static constexpr std::array<uint32_t, 7> rainbowColours {{
+        0xffff1744, 0xffff5a00, 0xffffd600, 0xff00c853,
+        0xff00a8ff, 0xff3d3dff, 0xffa100ff
+    }};
+    const auto& colours = rainbowUiEnabled ? rainbowColours : darkColours;
     return juce::Colour (colours[static_cast<size_t> (std::abs (index) % static_cast<int> (colours.size()))]);
 }
 
@@ -694,7 +703,10 @@ struct PipeFilter
 
 struct PipeLogic
 {
-    enum class Mode { gate = 0, counter, switcher, comparator, flipFlop, everyNth };
+    enum class Mode { gate = 0, counter, switcher, comparator, flipFlop, everyNth, andGate, orGate, xorGate };
+    enum class Orientation { right = 0, down, left, up };
+    enum class SignalMode { edge = 0, level };
+    enum class TimeoutAction { discard = 0, release, reverse, reroute };
     enum class Comparison { less = 0, lessOrEqual, equal, greaterOrEqual, greater };
     enum class Branch { left = 0, straight, right, random };
 
@@ -704,12 +716,26 @@ struct PipeLogic
     Branch branch = Branch::straight;
     int targetCount = 4;
     double compareSpeed = 1.0;
+    double coincidenceBeats = 0.125;
+    double levelHoldBeats = 0.25;
     bool gateOpen = true;
     bool enabled = true;
+    Orientation orientation = Orientation::right;
+    SignalMode signalMode = SignalMode::edge;
+    TimeoutAction timeoutAction = TimeoutAction::discard;
 
     // Runtime state is reset with the transport and is not persisted.
     int count = 0;
     bool flipState = false;
+    int inputAKey = -1;
+    int inputBKey = -1;
+    double inputABeat = -1000.0;
+    double inputBBeat = -1000.0;
+    double inputAFlashUntilMs = 0.0;
+    double inputBFlashUntilMs = 0.0;
+    double outputFlashUntilMs = 0.0;
+    bool releaseHeldInput = false;
+    juce::String lastEvent { "Waiting" };
     juce::String id { juce::Uuid().toString() };
 };
 
@@ -888,11 +914,17 @@ public:
         repaint();
     }
 
+    void setAccent (juce::Colour newAccent)
+    {
+        iconAccent = newAccent;
+        repaint();
+    }
+
     void paintButton (juce::Graphics& g, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override
     {
         const auto bounds = getLocalBounds().toFloat().reduced (1.5f);
         const auto isActive = getToggleState();
-        auto base = isActive ? accentColour()
+        auto base = isActive ? iconAccent
                              : juce::Colour (0x00000000);
 
         if (! isActive && shouldDrawButtonAsHighlighted)
@@ -911,7 +943,7 @@ public:
 
         if (isActive || shouldDrawButtonAsHighlighted)
         {
-            g.setColour ((isActive ? accentColour().brighter (0.18f) : subtleStroke()).withAlpha (0.88f));
+            g.setColour ((isActive ? iconAccent.brighter (0.18f) : subtleStroke()).withAlpha (0.88f));
             g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 0.8f);
         }
 
@@ -924,6 +956,7 @@ public:
 private:
     Icon icon;
     float iconScale = 1.0f;
+    juce::Colour iconAccent { accentColour() };
 
     void drawIcon (juce::Graphics& g, juce::Rectangle<float> area) const
     {
@@ -1003,7 +1036,7 @@ private:
                 {
                     const auto node = juce::Rectangle<float> (nodeDiameter, nodeDiameter).withCentre (point);
                     g.fillEllipse (node);
-                    g.setColour (getToggleState() ? accentColour() : appBackground());
+                    g.setColour (getToggleState() ? iconAccent : appBackground());
                     g.fillEllipse (node.reduced (2.0f));
                     g.setColour (getToggleState() ? juce::Colours::white : textPrimary().withAlpha (0.90f));
                 }
@@ -1147,13 +1180,23 @@ private:
 
             case Icon::logic:
             {
-                const auto box = area.reduced (4.0f, 3.0f);
-                const auto y = box.getCentreY();
-                g.drawLine ({ area.getX(), y, box.getX(), y }, 2.2f);
-                g.drawLine ({ box.getRight(), y, area.getRight(), y }, 2.2f);
-                g.drawRoundedRectangle (box, 2.5f, 2.0f);
-                g.setFont (juce::FontOptions (juce::jmax (8.0f, box.getHeight() * 0.40f), juce::Font::bold));
-                g.drawText ("IF", box, juce::Justification::centred, false);
+                const auto body = area.reduced (5.0f, 3.5f);
+                const auto inletTop = body.getCentreY() - body.getHeight() * 0.22f;
+                const auto inletBottom = body.getCentreY() + body.getHeight() * 0.22f;
+                const auto stroke = juce::jmax (1.6f, area.getWidth() * 0.085f);
+
+                g.drawLine ({ area.getX(), inletTop, body.getX(), inletTop }, stroke);
+                g.drawLine ({ area.getX(), inletBottom, body.getX(), inletBottom }, stroke);
+                g.drawLine ({ body.getRight(), body.getCentreY(), area.getRight(), body.getCentreY() }, stroke);
+
+                juce::Path gate;
+                gate.startNewSubPath (body.getX(), body.getY());
+                gate.lineTo (body.getCentreX(), body.getY());
+                gate.cubicTo (body.getRight() - 1.0f, body.getY(), body.getRight() - 1.0f, body.getBottom(), body.getCentreX(), body.getBottom());
+                gate.lineTo (body.getX(), body.getBottom());
+                gate.closeSubPath();
+                g.strokePath (gate, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
                 break;
             }
 
@@ -2010,11 +2053,13 @@ private:
     void notify() { if (onChange) onChange (value); }
 };
 
-class LogicSettingsComponent final : public juce::Component
+class LogicSettingsComponent final : public juce::Component, private juce::Timer
 {
 public:
-    LogicSettingsComponent (PipeLogic initial, std::function<void(const PipeLogic&)> changed)
-        : value (std::move (initial)), onChange (std::move (changed))
+    LogicSettingsComponent (PipeLogic initial, std::function<void(const PipeLogic&)> changed,
+                            std::function<PipeLogic()> liveReader = {}, std::function<juce::String()> connectionReader = {})
+        : value (std::move (initial)), onChange (std::move (changed)), readLive (std::move (liveReader)),
+          readConnections (std::move (connectionReader))
     {
         styleEditorLabel (title, 15.0f, true);
         title.setText ("Logic", juce::dontSendNotification);
@@ -2023,9 +2068,42 @@ public:
         styleEditorLabel (modeLabel, 12.0f, false);
         modeLabel.setText ("Rule", juce::dontSendNotification);
         addAndMakeVisible (modeLabel);
-        mode.addItemList ({ "Gate", "Count to open", "Switch", "Speed comparison", "Flip-flop", "Every Nth drop" }, 1);
+        mode.addItemList ({ "Gate", "Count to open", "Switch", "Speed comparison", "Flip-flop", "Every Nth drop",
+                            "AND", "OR", "XOR" }, 1);
         mode.setSelectedId (static_cast<int> (value.mode) + 1, juce::dontSendNotification);
         addAndMakeVisible (mode);
+
+        styleEditorLabel (orientationLabel, 12.0f, false);
+        orientationLabel.setText ("Faces", juce::dontSendNotification);
+        addAndMakeVisible (orientationLabel);
+        orientation.addItemList ({ "Right", "Down", "Left", "Up" }, 1);
+        orientation.setSelectedId (static_cast<int> (value.orientation) + 1, juce::dontSendNotification);
+        addAndMakeVisible (orientation);
+
+        styleEditorLabel (coincidenceLabel, 12.0f, false);
+        coincidenceLabel.setText ("Input window", juce::dontSendNotification);
+        addAndMakeVisible (coincidenceLabel);
+        coincidence.setRange (0.0625, 4.0, 0.0625);
+        coincidence.setValue (value.coincidenceBeats, juce::dontSendNotification);
+        coincidence.setSliderStyle (juce::Slider::LinearHorizontal);
+        coincidence.setTextBoxStyle (juce::Slider::TextBoxRight, false, 78, 26);
+        coincidence.setTextValueSuffix (" beats");
+        coincidence.setColour (juce::Slider::thumbColourId, juce::Colour (0xff39f58a));
+        addAndMakeVisible (coincidence);
+
+        styleEditorLabel (signalModeLabel, 12.0f, false);
+        signalModeLabel.setText ("Input mode", juce::dontSendNotification);
+        addAndMakeVisible (signalModeLabel);
+        signalMode.addItemList ({ "Edge", "Level" }, 1);
+        signalMode.setSelectedId (static_cast<int> (value.signalMode) + 1, juce::dontSendNotification);
+        addAndMakeVisible (signalMode);
+
+        styleEditorLabel (timeoutLabel, 12.0f, false);
+        timeoutLabel.setText ("On timeout", juce::dontSendNotification);
+        addAndMakeVisible (timeoutLabel);
+        timeout.addItemList ({ "Discard", "Release", "Reverse", "Reroute" }, 1);
+        timeout.setSelectedId (static_cast<int> (value.timeoutAction) + 1, juce::dontSendNotification);
+        addAndMakeVisible (timeout);
 
         gateOpen.setButtonText ("Gate open");
         gateOpen.setToggleState (value.gateOpen, juce::dontSendNotification);
@@ -2071,10 +2149,36 @@ public:
         explanation.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (explanation);
 
+        styleEditorLabel (diagnostics, 11.0f, false);
+        diagnostics.setColour (juce::Label::textColourId, textMuted());
+        diagnostics.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (diagnostics);
+
         mode.onChange = [this]
         {
-            value.mode = static_cast<PipeLogic::Mode> (juce::jlimit (0, 5, mode.getSelectedId() - 1));
+            value.mode = static_cast<PipeLogic::Mode> (juce::jlimit (0, 8, mode.getSelectedId() - 1));
             updateState();
+            notify();
+        };
+        orientation.onChange = [this] { value.orientation = static_cast<PipeLogic::Orientation> (juce::jlimit (0, 3, orientation.getSelectedId() - 1)); notify(); };
+        coincidence.onValueChange = [this]
+        {
+            if (value.signalMode == PipeLogic::SignalMode::level) value.levelHoldBeats = coincidence.getValue();
+            else value.coincidenceBeats = coincidence.getValue();
+            notify();
+        };
+        signalMode.onChange = [this]
+        {
+            value.signalMode = static_cast<PipeLogic::SignalMode> (juce::jlimit (0, 1, signalMode.getSelectedId() - 1));
+            coincidenceLabel.setText (value.signalMode == PipeLogic::SignalMode::edge ? "Input window" : "Level hold", juce::dontSendNotification);
+            coincidence.setValue (value.signalMode == PipeLogic::SignalMode::edge ? value.coincidenceBeats : value.levelHoldBeats, juce::dontSendNotification);
+            notify();
+        };
+        timeout.onChange = [this] { value.timeoutAction = static_cast<PipeLogic::TimeoutAction> (juce::jlimit (0, 3, timeout.getSelectedId() - 1)); notify(); };
+        coincidence.onDragEnd = [this]
+        {
+            if (value.signalMode == PipeLogic::SignalMode::level) value.levelHoldBeats = coincidence.getValue();
+            else value.coincidenceBeats = coincidence.getValue();
             notify();
         };
         gateOpen.onClick = [this] { value.gateOpen = gateOpen.getToggleState(); notify(); };
@@ -2085,6 +2189,7 @@ public:
 
         setSize (350, 170);
         updateState();
+        startTimerHz (20);
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (surfaceColour()); }
@@ -2098,6 +2203,25 @@ public:
         modeLabel.setBounds (modeRow.removeFromLeft (105));
         mode.setBounds (modeRow.reduced (0, 3));
         area.removeFromTop (5);
+
+        if (orientation.isVisible())
+        {
+            auto row = area.removeFromTop (38);
+            orientationLabel.setBounds (row.removeFromLeft (105));
+            orientation.setBounds (row.reduced (0, 3));
+        }
+        if (coincidence.isVisible())
+        {
+            auto signalModeRow = area.removeFromTop (38);
+            signalModeLabel.setBounds (signalModeRow.removeFromLeft (105));
+            signalMode.setBounds (signalModeRow.reduced (0, 3));
+            auto row = area.removeFromTop (38);
+            coincidenceLabel.setBounds (row.removeFromLeft (105));
+            coincidence.setBounds (row);
+            row = area.removeFromTop (38);
+            timeoutLabel.setBounds (row.removeFromLeft (105));
+            timeout.setBounds (row.reduced (0, 3));
+        }
 
         if (gateOpen.isVisible()) gateOpen.setBounds (area.removeFromTop (34));
         if (target.isVisible())
@@ -2123,15 +2247,18 @@ public:
         }
         area.removeFromTop (3);
         explanation.setBounds (area.removeFromTop (38));
+        diagnostics.setBounds (area.removeFromTop (64));
     }
 
 private:
     PipeLogic value;
     std::function<void(const PipeLogic&)> onChange;
-    juce::Label title, modeLabel, targetLabel, branchLabel, comparisonLabel, speedLabel, explanation;
-    juce::ComboBox mode, branch, comparison;
+    std::function<PipeLogic()> readLive;
+    std::function<juce::String()> readConnections;
+    juce::Label title, modeLabel, orientationLabel, coincidenceLabel, signalModeLabel, timeoutLabel, targetLabel, branchLabel, comparisonLabel, speedLabel, explanation, diagnostics;
+    juce::ComboBox mode, orientation, signalMode, timeout, branch, comparison;
     juce::ToggleButton gateOpen;
-    juce::Slider target, speed;
+    juce::Slider coincidence, target, speed;
 
     void updateState()
     {
@@ -2139,7 +2266,16 @@ private:
         const auto isCount = value.mode == PipeLogic::Mode::counter || value.mode == PipeLogic::Mode::everyNth;
         const auto isSwitch = value.mode == PipeLogic::Mode::switcher;
         const auto isComparator = value.mode == PipeLogic::Mode::comparator;
+        const auto isBinaryGate = value.mode == PipeLogic::Mode::andGate
+                               || value.mode == PipeLogic::Mode::orGate
+                               || value.mode == PipeLogic::Mode::xorGate;
+        const auto isAnyGate = isGate || isBinaryGate;
 
+        orientationLabel.setVisible (isAnyGate); orientation.setVisible (isAnyGate);
+        coincidenceLabel.setVisible (isBinaryGate); coincidence.setVisible (isBinaryGate);
+        signalModeLabel.setVisible (isBinaryGate); signalMode.setVisible (isBinaryGate);
+        timeoutLabel.setVisible (value.mode == PipeLogic::Mode::andGate); timeout.setVisible (value.mode == PipeLogic::Mode::andGate);
+        diagnostics.setVisible (isBinaryGate);
         gateOpen.setVisible (isGate);
         targetLabel.setVisible (isCount); target.setVisible (isCount);
         branchLabel.setVisible (isSwitch); branch.setVisible (isSwitch);
@@ -2152,11 +2288,35 @@ private:
         else if (isSwitch) explanation.setText ("Chooses an exit at a pipe junction.", juce::dontSendNotification);
         else if (isComparator) explanation.setText ("Only drops matching the speed comparison pass.", juce::dontSendNotification);
         else if (value.mode == PipeLogic::Mode::flipFlop) explanation.setText ("Alternates junction exits, or pass and block on a straight pipe.", juce::dontSendNotification);
+        else if (value.mode == PipeLogic::Mode::andGate) explanation.setText ("Passes when drops arrive at both inputs together.", juce::dontSendNotification);
+        else if (value.mode == PipeLogic::Mode::orGate) explanation.setText ("Passes a drop arriving at either input.", juce::dontSendNotification);
+        else if (value.mode == PipeLogic::Mode::xorGate) explanation.setText ("Passes when only one input is active.", juce::dontSendNotification);
         else explanation.setText ("Only each selected numbered drop passes.", juce::dontSendNotification);
 
-        setSize (350, isComparator ? 220 : 180);
+        coincidenceLabel.setText (value.signalMode == PipeLogic::SignalMode::edge ? "Input window" : "Level hold", juce::dontSendNotification);
+        coincidence.setValue (value.signalMode == PipeLogic::SignalMode::edge ? value.coincidenceBeats : value.levelHoldBeats, juce::dontSendNotification);
+        setSize (350, isComparator ? 220 : (isBinaryGate ? (value.mode == PipeLogic::Mode::andGate ? 425 : 385) : (isGate ? 220 : 180)));
         resized();
         repaint();
+    }
+
+    void timerCallback() override
+    {
+        if (! readLive) return;
+        const auto live = readLive();
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const auto a = live.inputAFlashUntilMs > now;
+        const auto b = live.inputBFlashUntilMs > now;
+        const auto out = live.outputFlashUntilMs > now;
+        juce::String truth;
+        if (live.mode == PipeLogic::Mode::andGate) truth = "00→0   01→0   10→0   11→1";
+        else if (live.mode == PipeLogic::Mode::orGate) truth = "00→0   01→1   10→1   11→1";
+        else if (live.mode == PipeLogic::Mode::xorGate) truth = "00→0   01→1   10→1   11→0";
+        auto connections = readConnections ? readConnections() : juce::String();
+        diagnostics.setText ("A " + juce::String (a ? "ON" : "off") + "   B " + (b ? "ON" : "off")
+                             + "   OUT " + (out ? "ON" : "off") + "\n" + truth + "\n"
+                             + connections + (connections.isNotEmpty() ? "  ·  " : "") + live.lastEvent,
+                             juce::dontSendNotification);
     }
 
     void notify() { if (onChange) onChange (value); }
@@ -3757,18 +3917,53 @@ public:
             for (const auto& item : routePaintItems)
                 drawRouteLayer (g, item, layer);
 
+        drawLogicSignalTraces (g);
         drawFlowPulses (g);
         drawFlowDebugEvents (g);
+
+        const auto deviceDiameter = compactDiscs ? gridSize * 0.55f : gridSize;
+        const auto deviceScale = deviceDiameter / gridSize;
+        const auto deviceArea = [deviceDiameter] (juce::Point<float> position)
+        {
+            return juce::Rectangle<float> (deviceDiameter, deviceDiameter).withCentre (position);
+        };
+        const auto drawRoundDevice = [&g, &deviceArea, deviceScale] (juce::Point<float> position, juce::Colour colour)
+        {
+            const auto area = deviceArea (position);
+            const auto rim = area.expanded (1.4f * deviceScale);
+            g.setColour (juce::Colour (0xff010504).withAlpha (0.52f));
+            g.fillEllipse (area.translated (1.5f * deviceScale, 2.0f * deviceScale).expanded (2.0f * deviceScale));
+            g.setColour (colour.withMultipliedAlpha (0.96f));
+            g.fillEllipse (rim);
+            g.setColour (colour.darker (0.58f).withMultipliedAlpha (0.98f));
+            g.fillEllipse (area.reduced (2.3f * deviceScale));
+            g.setColour (juce::Colours::white.withAlpha (0.24f));
+            g.fillEllipse (area.reduced (4.0f * deviceScale).withTrimmedBottom (area.getHeight() * 0.34f));
+            g.setColour (juce::Colour (0xff020807).withAlpha (0.46f));
+            g.drawEllipse (rim, juce::jmax (0.7f, deviceScale));
+        };
+        const auto drawSquareDevice = [&g, &deviceArea, deviceScale] (juce::Point<float> position, juce::Colour colour)
+        {
+            const auto area = deviceArea (position);
+            const auto radius = 4.0f * deviceScale;
+            g.setColour (juce::Colour (0xff010504).withAlpha (0.52f));
+            g.fillRoundedRectangle (area.translated (1.5f * deviceScale, 2.0f * deviceScale).expanded (2.0f * deviceScale), radius);
+            g.setColour (colour.withMultipliedAlpha (0.96f));
+            g.fillRoundedRectangle (area.expanded (1.4f * deviceScale), radius);
+            g.setColour (colour.darker (0.58f).withMultipliedAlpha (0.98f));
+            g.fillRoundedRectangle (area.reduced (2.3f * deviceScale), radius * 0.72f);
+            g.setColour (juce::Colour (0xff020807).withAlpha (0.46f));
+            g.drawRoundedRectangle (area.expanded (1.4f * deviceScale), radius, juce::jmax (0.7f, deviceScale));
+        };
 
         for (const auto& tap : pipeTaps())
         {
             const auto colour = tap.enabled ? juce::Colour (0xff56d9ff) : textMuted();
-            g.setColour (colour.withAlpha (0.20f));
-            g.fillEllipse (juce::Rectangle<float> (20.0f, 20.0f).withCentre (tap.position));
+            drawRoundDevice (tap.position, colour);
             g.setColour (colour);
-            g.drawEllipse (juce::Rectangle<float> (11.0f, 11.0f).withCentre (tap.position), 2.0f);
-            g.drawLine ({ tap.position.x - 3.5f, tap.position.y, tap.position.x + 3.5f, tap.position.y }, 1.8f);
-            g.drawLine ({ tap.position.x, tap.position.y - 3.5f, tap.position.x, tap.position.y + 3.5f }, 1.8f);
+            g.drawEllipse (deviceArea (tap.position).reduced (5.5f * deviceScale), juce::jmax (0.9f, 2.0f * deviceScale));
+            g.drawLine ({ tap.position.x - 3.5f * deviceScale, tap.position.y, tap.position.x + 3.5f * deviceScale, tap.position.y }, juce::jmax (0.8f, 1.8f * deviceScale));
+            g.drawLine ({ tap.position.x, tap.position.y - 3.5f * deviceScale, tap.position.x, tap.position.y + 3.5f * deviceScale }, juce::jmax (0.8f, 1.8f * deviceScale));
             if (tap.clockIndex > 0)
             {
                 static const std::array<juce::Colour, 4> clockColours {
@@ -3777,14 +3972,14 @@ public:
                 };
                 const auto clock = juce::jlimit (1, 4, tap.clockIndex);
                 const auto enabled = sequencingClocks[static_cast<size_t> (clock - 1)].enabled;
-                const auto badge = juce::Rectangle<float> (9.0f, 9.0f)
-                                       .withCentre (tap.position.translated (7.0f, -7.0f));
+                const auto badge = juce::Rectangle<float> (9.0f * deviceScale, 9.0f * deviceScale)
+                                       .withCentre (tap.position.translated (7.0f * deviceScale, -7.0f * deviceScale));
                 g.setColour (juce::Colour (0xff08110e).withAlpha (0.92f));
                 g.fillEllipse (badge.expanded (1.2f));
                 g.setColour (clockColours[static_cast<size_t> (clock - 1)].withMultipliedAlpha (enabled ? 1.0f : 0.32f));
                 g.fillEllipse (badge);
                 g.setColour (juce::Colour (0xff08110e));
-                g.setFont (juce::FontOptions (6.5f, juce::Font::bold));
+                g.setFont (juce::FontOptions (juce::jmax (4.5f, 6.5f * deviceScale), juce::Font::bold));
                 g.drawText (juce::String (clock), badge, juce::Justification::centred);
             }
         }
@@ -3792,53 +3987,49 @@ public:
         for (const auto& drain : pipeDrains())
         {
             const auto colour = pdPatchElementColour().withMultipliedAlpha (drain.enabled ? 1.0f : 0.28f);
-            g.setColour (colour.withAlpha (0.18f));
-            g.fillEllipse (juce::Rectangle<float> (22.0f, 22.0f).withCentre (drain.position));
+            drawRoundDevice (drain.position, colour);
             g.setColour (colour);
-            g.drawEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre (drain.position), 1.8f);
-            g.drawLine ({ drain.position.x - 3.0f, drain.position.y - 2.0f,
-                          drain.position.x, drain.position.y + 3.0f }, 1.6f);
-            g.drawLine ({ drain.position.x, drain.position.y + 3.0f,
-                          drain.position.x + 3.0f, drain.position.y - 2.0f }, 1.6f);
+            g.drawEllipse (deviceArea (drain.position).reduced (6.0f * deviceScale), juce::jmax (0.8f, 1.8f * deviceScale));
+            g.drawLine ({ drain.position.x - 3.0f * deviceScale, drain.position.y - 2.0f * deviceScale,
+                          drain.position.x, drain.position.y + 3.0f * deviceScale }, juce::jmax (0.8f, 1.6f * deviceScale));
+            g.drawLine ({ drain.position.x, drain.position.y + 3.0f * deviceScale,
+                          drain.position.x + 3.0f * deviceScale, drain.position.y - 2.0f * deviceScale }, juce::jmax (0.8f, 1.6f * deviceScale));
         }
 
         for (const auto& cloner : pipeCloners())
         {
             const auto colour = juce::Colour (0xffb888ff).withMultipliedAlpha (cloner.enabled ? 1.0f : 0.28f);
-            g.setColour (colour.withAlpha (0.18f));
-            g.fillEllipse (juce::Rectangle<float> (22.0f, 22.0f).withCentre (cloner.position));
+            drawRoundDevice (cloner.position, colour);
             g.setColour (colour);
-            g.drawEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre (cloner.position), 1.8f);
-            g.drawLine ({ cloner.position.x - 3.5f, cloner.position.y,
-                          cloner.position.x + 3.5f, cloner.position.y - 3.5f }, 1.6f);
-            g.drawLine ({ cloner.position.x - 3.5f, cloner.position.y,
-                          cloner.position.x + 3.5f, cloner.position.y + 3.5f }, 1.6f);
+            g.drawEllipse (deviceArea (cloner.position).reduced (6.0f * deviceScale), juce::jmax (0.8f, 1.8f * deviceScale));
+            g.drawLine ({ cloner.position.x - 3.5f * deviceScale, cloner.position.y,
+                          cloner.position.x + 3.5f * deviceScale, cloner.position.y - 3.5f * deviceScale }, juce::jmax (0.8f, 1.6f * deviceScale));
+            g.drawLine ({ cloner.position.x - 3.5f * deviceScale, cloner.position.y,
+                          cloner.position.x + 3.5f * deviceScale, cloner.position.y + 3.5f * deviceScale }, juce::jmax (0.8f, 1.6f * deviceScale));
         }
 
         for (const auto& limit : pipeSpeedLimits())
         {
             const auto colour = juce::Colour (0xffffb84d).withMultipliedAlpha (limit.enabled ? 1.0f : 0.28f);
-            const auto sign = juce::Rectangle<float> (14.0f, 14.0f).withCentre (limit.position);
-            g.setColour (colour.withAlpha (0.18f));
-            g.fillEllipse (sign.expanded (4.0f));
+            const auto sign = deviceArea (limit.position).reduced (5.0f * deviceScale);
+            drawRoundDevice (limit.position, colour);
             g.setColour (colour);
-            g.drawEllipse (sign, 1.8f);
-            g.setFont (juce::FontOptions (7.5f, juce::Font::bold));
+            g.drawEllipse (sign, juce::jmax (0.8f, 1.8f * deviceScale));
+            g.setFont (juce::FontOptions (juce::jmax (4.5f, 7.5f * deviceScale), juce::Font::bold));
             g.drawText (juce::String (limit.bpmMultiplier, 2) + "x", sign, juce::Justification::centred, false);
         }
 
         for (const auto& wait : pipeWaits())
         {
             const auto colour = juce::Colour (0xffffd166).withMultipliedAlpha (wait.enabled ? 1.0f : 0.28f);
-            const auto marker = juce::Rectangle<float> (14.0f, 14.0f).withCentre (wait.position);
-            g.setColour (colour.withAlpha (0.18f));
-            g.fillEllipse (marker.expanded (4.0f));
+            const auto marker = deviceArea (wait.position).reduced (5.0f * deviceScale);
+            drawRoundDevice (wait.position, colour);
             g.setColour (colour);
-            g.drawEllipse (marker, 1.6f);
-            g.drawLine ({ marker.getX() + 4.0f, marker.getY() + 3.0f,
-                          marker.getRight() - 4.0f, marker.getBottom() - 3.0f }, 1.4f);
-            g.drawLine ({ marker.getRight() - 4.0f, marker.getY() + 3.0f,
-                          marker.getX() + 4.0f, marker.getBottom() - 3.0f }, 1.4f);
+            g.drawEllipse (marker, juce::jmax (0.8f, 1.6f * deviceScale));
+            g.drawLine ({ marker.getX() + 4.0f * deviceScale, marker.getY() + 3.0f * deviceScale,
+                          marker.getRight() - 4.0f * deviceScale, marker.getBottom() - 3.0f * deviceScale }, juce::jmax (0.8f, 1.4f * deviceScale));
+            g.drawLine ({ marker.getRight() - 4.0f * deviceScale, marker.getY() + 3.0f * deviceScale,
+                          marker.getX() + 4.0f * deviceScale, marker.getBottom() - 3.0f * deviceScale }, juce::jmax (0.8f, 1.4f * deviceScale));
         }
 
         for (const auto& strike : pipeStrikes())
@@ -3853,14 +4044,13 @@ public:
             g.setColour (colour.withAlpha (0.28f));
             for (const auto endpoint : endpoints)
                 g.drawLine ({ strike.position, endpoint }, 2.2f);
-            g.setColour (colour.withAlpha (0.18f));
-            g.fillEllipse (juce::Rectangle<float> (22.0f, 22.0f).withCentre (strike.position));
+            drawRoundDevice (strike.position, colour);
             g.setColour (colour);
-            g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (strike.position));
+            g.fillEllipse (juce::Rectangle<float> (5.0f * deviceScale, 5.0f * deviceScale).withCentre (strike.position));
             for (const auto endpoint : endpoints)
             {
                 g.setColour (colour.withAlpha (0.78f));
-                g.fillEllipse (juce::Rectangle<float> (4.5f, 4.5f).withCentre (endpoint));
+                g.fillEllipse (juce::Rectangle<float> (4.5f * deviceScale, 4.5f * deviceScale).withCentre (endpoint));
             }
         }
 
@@ -3876,46 +4066,156 @@ public:
                         g.drawDashedLine ({ teleport.position, destination.position }, std::array<float, 2> { 5.0f, 4.0f }.data(), 2, 1.1f);
                         break;
                     }
-            g.setColour (colour.withAlpha (0.18f)); g.fillEllipse (juce::Rectangle<float> (22.0f, 22.0f).withCentre (teleport.position));
-            g.setColour (colour); g.drawEllipse (juce::Rectangle<float> (13.0f, 13.0f).withCentre (teleport.position), 1.8f);
-            g.setFont (juce::FontOptions (7.0f, juce::Font::bold));
-            g.drawText (juce::String (i + 1), juce::Rectangle<float> (12.0f, 12.0f).withCentre (teleport.position), juce::Justification::centred, false);
+            drawRoundDevice (teleport.position, colour);
+            g.setColour (colour); g.drawEllipse (deviceArea (teleport.position).reduced (5.5f * deviceScale), juce::jmax (0.8f, 1.8f * deviceScale));
+            g.setFont (juce::FontOptions (juce::jmax (4.5f, 7.0f * deviceScale), juce::Font::bold));
+            g.drawText (juce::String (i + 1), deviceArea (teleport.position).reduced (6.0f * deviceScale), juce::Justification::centred, false);
         }
         for (const auto& filter : pipeFilters())
         {
             const auto colour = juce::Colour (0xff7dd3fc).withMultipliedAlpha (filter.enabled ? 1.0f : 0.28f);
-            const auto marker = juce::Rectangle<float> (24.0f, 20.0f).withCentre (filter.position);
-            g.setColour (colour.withAlpha (0.14f));
-            g.fillRoundedRectangle (marker.expanded (5.0f), 6.0f);
-            const auto box = juce::Rectangle<float> (16.0f, 18.0f).withCentre (filter.position);
+            const auto marker = deviceArea (filter.position);
+            drawSquareDevice (filter.position, colour);
+            const auto box = juce::Rectangle<float> (16.0f * deviceScale, 18.0f * deviceScale).withCentre (filter.position);
             const auto y = filter.position.y;
             g.setColour (colour.withAlpha (0.96f));
-            g.drawLine ({ marker.getX(), y, box.getX(), y }, 2.0f);
-            g.drawLine ({ box.getRight(), y, marker.getRight(), y }, 2.0f);
-            g.drawRoundedRectangle (box, 2.0f, 1.8f);
-            g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+            g.drawLine ({ marker.getX(), y, box.getX(), y }, juce::jmax (0.8f, 2.0f * deviceScale));
+            g.drawLine ({ box.getRight(), y, marker.getRight(), y }, juce::jmax (0.8f, 2.0f * deviceScale));
+            g.drawRoundedRectangle (box, 2.0f * deviceScale, juce::jmax (0.8f, 1.8f * deviceScale));
+            g.setFont (juce::FontOptions (juce::jmax (5.0f, 10.0f * deviceScale), juce::Font::bold));
             g.drawText ("F", box, juce::Justification::centred, false);
         }
 
         for (const auto& logic : pipeLogics())
         {
             const auto colour = juce::Colour (0xffffd166).withMultipliedAlpha (logic.enabled ? 1.0f : 0.28f);
-            const auto marker = juce::Rectangle<float> (27.0f, 21.0f).withCentre (logic.position);
-            const auto box = marker.reduced (4.0f, 1.5f);
+            const auto marker = deviceArea (logic.position);
+            const auto box = marker.reduced (4.0f * deviceScale, 1.5f * deviceScale);
             const auto abbreviation = logic.mode == PipeLogic::Mode::gate ? "G"
                                       : logic.mode == PipeLogic::Mode::counter ? "#"
                                       : logic.mode == PipeLogic::Mode::switcher ? "S"
                                       : logic.mode == PipeLogic::Mode::comparator ? "<"
                                       : logic.mode == PipeLogic::Mode::flipFlop ? "T"
+                                      : logic.mode == PipeLogic::Mode::andGate ? "&"
+                                      : logic.mode == PipeLogic::Mode::orGate ? ">1"
+                                      : logic.mode == PipeLogic::Mode::xorGate ? "=1"
                                       : "N";
-            g.setColour (colour.withAlpha (0.14f));
-            g.fillRoundedRectangle (marker.expanded (4.0f), 6.0f);
+            drawSquareDevice (logic.position, colour);
             g.setColour (colour.withAlpha (0.96f));
-            g.drawLine ({ marker.getX(), logic.position.y, box.getX(), logic.position.y }, 2.0f);
-            g.drawLine ({ box.getRight(), logic.position.y, marker.getRight(), logic.position.y }, 2.0f);
-            g.drawRoundedRectangle (box, 2.5f, 1.8f);
-            g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
-            g.drawText (abbreviation, box, juce::Justification::centred, false);
+            const auto stroke = juce::jmax (0.8f, 1.8f * deviceScale);
+            const auto isGateShape = logic.mode == PipeLogic::Mode::gate
+                                  || logic.mode == PipeLogic::Mode::andGate
+                                  || logic.mode == PipeLogic::Mode::orGate
+                                  || logic.mode == PipeLogic::Mode::xorGate;
+            if (isGateShape)
+            {
+                juce::Graphics::ScopedSaveState gateState (g);
+                g.addTransform (juce::AffineTransform::rotation (logicOrientationAngle (logic.orientation),
+                                                                  logic.position.x, logic.position.y));
+                const auto gateBody = marker.reduced (6.0f * deviceScale, 5.0f * deviceScale);
+                const auto inletTop = gateBody.getCentreY() - gateBody.getHeight() * 0.24f;
+                const auto inletBottom = gateBody.getCentreY() + gateBody.getHeight() * 0.24f;
+                if (logic.mode == PipeLogic::Mode::gate)
+                    g.drawLine ({ marker.getX() + 1.5f * deviceScale, logic.position.y, gateBody.getX(), logic.position.y }, stroke);
+                else
+                {
+                    g.drawLine ({ marker.getX() + 1.5f * deviceScale, inletTop, gateBody.getX(), inletTop }, stroke);
+                    g.drawLine ({ marker.getX() + 1.5f * deviceScale, inletBottom, gateBody.getX(), inletBottom }, stroke);
+                }
+                g.drawLine ({ gateBody.getRight(), logic.position.y, marker.getRight() - 1.5f * deviceScale, logic.position.y }, stroke);
+
+                juce::Path gate;
+                gate.startNewSubPath (gateBody.getX(), gateBody.getY());
+                gate.lineTo (gateBody.getCentreX(), gateBody.getY());
+                gate.cubicTo (gateBody.getRight(), gateBody.getY(), gateBody.getRight(), gateBody.getBottom(),
+                              gateBody.getCentreX(), gateBody.getBottom());
+                gate.lineTo (gateBody.getX(), gateBody.getBottom());
+                gate.closeSubPath();
+                g.strokePath (gate, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+                if (logic.mode != PipeLogic::Mode::gate)
+                {
+                    g.setFont (juce::FontOptions (juce::jmax (4.5f, 6.4f * deviceScale), juce::Font::bold));
+                    g.drawText (abbreviation, gateBody.reduced (1.0f * deviceScale), juce::Justification::centred, false);
+
+                    const auto connections = logicConnectionStatus (logic.position, logic.orientation);
+                    const auto lampDiameter = juce::jmax (2.8f, 4.2f * deviceScale);
+                    const auto inletX = marker.getX() + 2.2f * deviceScale;
+                    const std::array<juce::Point<float>, 2> inletLamps {{
+                        { inletX, inletTop }, { inletX, inletBottom }
+                    }};
+                    const auto connectedColour = juce::Colour (0xff39f58a);
+                    const auto activeColour = juce::Colour (0xffffec66);
+                    const auto emptyColour = textMuted().withAlpha (0.48f);
+                    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+                    const std::array<bool, 2> inputFlashing {{
+                        logic.inputAFlashUntilMs > nowMs, logic.inputBFlashUntilMs > nowMs
+                    }};
+                    const std::array<bool, 2> inputWaiting {{
+                        flowBeatPosition - logic.inputABeat <= logic.coincidenceBeats,
+                        flowBeatPosition - logic.inputBBeat <= logic.coincidenceBeats
+                    }};
+                    for (int input = 0; input < 2; ++input)
+                    {
+                        const auto lamp = juce::Rectangle<float> (lampDiameter, lampDiameter).withCentre (inletLamps[static_cast<size_t> (input)]);
+                        if (inputFlashing[static_cast<size_t> (input)] || inputWaiting[static_cast<size_t> (input)])
+                        {
+                            g.setColour (activeColour.withAlpha (inputFlashing[static_cast<size_t> (input)] ? 0.40f : 0.22f));
+                            g.fillEllipse (lamp.expanded (3.2f * deviceScale));
+                        }
+                        g.setColour (juce::Colour (0xff020807).withAlpha (0.90f));
+                        g.fillEllipse (lamp.expanded (juce::jmax (0.6f, deviceScale)));
+                        g.setColour (inputFlashing[static_cast<size_t> (input)] || inputWaiting[static_cast<size_t> (input)]
+                                         ? activeColour
+                                         : (connections.inputCount > input ? connectedColour : emptyColour));
+                        g.fillEllipse (lamp);
+                    }
+
+                    const auto outputLamp = juce::Rectangle<float> (lampDiameter, lampDiameter)
+                                                .withCentre ({ marker.getRight() - 2.2f * deviceScale, logic.position.y });
+                    g.setColour (juce::Colour (0xff020807).withAlpha (0.90f));
+                    g.fillEllipse (outputLamp.expanded (juce::jmax (0.6f, deviceScale)));
+                    if (logic.outputFlashUntilMs > nowMs)
+                    {
+                        g.setColour (activeColour.withAlpha (0.44f));
+                        g.fillEllipse (outputLamp.expanded (3.6f * deviceScale));
+                    }
+                    g.setColour (logic.outputFlashUntilMs > nowMs ? activeColour
+                                                                  : (connections.outputConnected ? connectedColour : emptyColour));
+                    g.fillEllipse (outputLamp);
+
+                    if (drawing && currentRoute.isPipe && currentRoute.points.size() >= 2
+                        && currentRoute.points.back().getDistanceFrom (logic.position) <= gridSize * 0.55f)
+                    {
+                        auto branch = currentRoute.points[currentRoute.points.size() - 2] - logic.position;
+                        const auto length = branch.getDistanceFromOrigin();
+                        if (length > 0.001f) branch /= length;
+                        const auto outputDirection = logicOutputDirection (logic.orientation);
+                        const auto previewsOutput = branch.x * outputDirection.x + branch.y * outputDirection.y > 0.5f;
+                        const auto previewInput = juce::jlimit (0, 1, connections.inputCount);
+                        const auto previewCentre = previewsOutput ? outputLamp.getCentre()
+                                                                 : inletLamps[static_cast<size_t> (previewInput)];
+                        g.setColour (juce::Colours::white.withAlpha (0.82f));
+                        g.drawEllipse (juce::Rectangle<float> (lampDiameter, lampDiameter).withCentre (previewCentre)
+                                           .expanded (2.5f * deviceScale), juce::jmax (0.8f, 1.3f * deviceScale));
+                    }
+
+                    if (connections.inputCount >= 2 && connections.outputConnected)
+                    {
+                        g.setColour (connectedColour.withAlpha (0.72f));
+                        g.drawRoundedRectangle (marker.expanded (0.8f * deviceScale), 4.5f * deviceScale,
+                                                juce::jmax (0.8f, 1.4f * deviceScale));
+                    }
+                }
+            }
+            else
+            {
+                g.drawLine ({ marker.getX(), logic.position.y, box.getX(), logic.position.y }, stroke);
+                g.drawLine ({ box.getRight(), logic.position.y, marker.getRight(), logic.position.y }, stroke);
+                g.drawRoundedRectangle (box, 2.5f * deviceScale, stroke);
+                g.setFont (juce::FontOptions (juce::jmax (5.0f, 10.0f * deviceScale), juce::Font::bold));
+                g.drawText (abbreviation, box, juce::Justification::centred, false);
+            }
         }
 
         const auto now = juce::Time::getMillisecondCounterHiRes();
@@ -3947,7 +4247,6 @@ public:
 
         if (event.mods.isPopupMenu())
         {
-            undo();
             return;
         }
 
@@ -4053,7 +4352,8 @@ public:
             }
 
             selectedTap = selectedDrain = selectedCloner = selectedSpeedLimit = selectedWait = selectedStrike = selectedTeleport = selectedFilter = selectedLogic = -1;
-            const auto deviceTolerance = screenToleranceToWorld (12.0f);
+            const auto deviceDiameter = compactDiscs ? gridSize * 0.55f : gridSize;
+            const auto deviceTolerance = screenToleranceToWorld (deviceDiameter * 0.55f);
             const auto findDevice = [worldPosition, deviceTolerance] (const auto& devices)
             {
                 for (int i = static_cast<int> (devices.size()) - 1; i >= 0; --i)
@@ -4594,9 +4894,78 @@ public:
         return true;
     }
 
+    struct SavedAssembly
+    {
+        juce::String name;
+        std::vector<RoadRoute> routes; std::vector<Disc> discs; std::vector<PipeTap> taps;
+        std::vector<PipeDrain> drains; std::vector<PipeCloner> cloners; std::vector<PipeSpeedLimit> speedLimits;
+        std::vector<PipeWait> waits; std::vector<PipeStrike> strikes; std::vector<PipeTeleport> teleports;
+        std::vector<PipeFilter> filters; std::vector<PipeLogic> logics;
+    };
+
     void copySelectedItems() { copySelection(); }
     void pasteSelectedItems() { pasteSelection(); }
     void duplicateSelectedItems() { copySelection(); pasteSelection(); }
+    bool saveSelectionAsAssembly()
+    {
+        if (selectedItems.empty()) return false;
+        copySelection();
+        SavedAssembly assembly;
+        assembly.name = "Assembly " + juce::String (savedAssemblies.size() + 1);
+        assembly.routes = clipboardRoutes; assembly.discs = clipboardDiscs; assembly.taps = clipboardTaps;
+        assembly.drains = clipboardDrains; assembly.cloners = clipboardCloners; assembly.speedLimits = clipboardSpeedLimits;
+        assembly.waits = clipboardWaits; assembly.strikes = clipboardStrikes; assembly.teleports = clipboardTeleports;
+        assembly.filters = clipboardFilters; assembly.logics = clipboardLogics;
+        juce::Rectangle<float> bounds;
+        bool hasBounds = false;
+        const auto include = [&] (juce::Point<float> point)
+        {
+            const juce::Rectangle<float> pointBounds (point.x, point.y, 0.001f, 0.001f);
+            bounds = hasBounds ? bounds.getUnion (pointBounds) : pointBounds;
+            hasBounds = true;
+        };
+        for (const auto& route : assembly.routes) for (const auto point : route.points) include (point);
+        for (const auto& item : assembly.discs) include (item.centre);
+        const auto includePositions = [&include] (const auto& items) { for (const auto& item : items) include (item.position); };
+        includePositions (assembly.taps); includePositions (assembly.drains); includePositions (assembly.cloners);
+        includePositions (assembly.speedLimits); includePositions (assembly.waits); includePositions (assembly.strikes);
+        includePositions (assembly.teleports); includePositions (assembly.filters); includePositions (assembly.logics);
+        const auto centre = hasBounds ? bounds.getCentre() : juce::Point<float>();
+        for (auto& route : assembly.routes) for (auto& point : route.points) point -= centre;
+        for (auto& item : assembly.discs) item.centre -= centre;
+        const auto centrePositions = [centre] (auto& items) { for (auto& item : items) item.position -= centre; };
+        centrePositions (assembly.taps); centrePositions (assembly.drains); centrePositions (assembly.cloners);
+        centrePositions (assembly.speedLimits); centrePositions (assembly.waits); centrePositions (assembly.strikes);
+        centrePositions (assembly.teleports); centrePositions (assembly.filters); centrePositions (assembly.logics);
+        savedAssemblies.push_back (std::move (assembly));
+        notifyChanged();
+        return true;
+    }
+    juce::StringArray assemblyNames() const
+    {
+        juce::StringArray names;
+        for (const auto& assembly : savedAssemblies) names.add (assembly.name);
+        return names;
+    }
+    bool insertAssembly (int index)
+    {
+        if (! juce::isPositiveAndBelow (index, static_cast<int> (savedAssemblies.size()))) return false;
+        const auto& assembly = savedAssemblies[static_cast<size_t> (index)];
+        clipboardRoutes = assembly.routes; clipboardDiscs = assembly.discs; clipboardTaps = assembly.taps;
+        clipboardDrains = assembly.drains; clipboardCloners = assembly.cloners; clipboardSpeedLimits = assembly.speedLimits;
+        clipboardWaits = assembly.waits; clipboardStrikes = assembly.strikes; clipboardTeleports = assembly.teleports;
+        clipboardFilters = assembly.filters; clipboardLogics = assembly.logics;
+        const auto placement = screenToWorld (getLocalBounds().getCentre().toFloat()) - juce::Point<float> (gridSize, gridSize);
+        for (auto& route : clipboardRoutes) for (auto& point : route.points) point += placement;
+        for (auto& item : clipboardDiscs) item.centre += placement;
+        const auto placePositions = [placement] (auto& items) { for (auto& item : items) item.position += placement; };
+        placePositions (clipboardTaps); placePositions (clipboardDrains); placePositions (clipboardCloners);
+        placePositions (clipboardSpeedLimits); placePositions (clipboardWaits); placePositions (clipboardStrikes);
+        placePositions (clipboardTeleports); placePositions (clipboardFilters); placePositions (clipboardLogics);
+        pasteSelection();
+        notifyChanged(); repaint();
+        return true;
+    }
 
     bool keyPressed (const juce::KeyPress& key) override
     {
@@ -4739,6 +5108,7 @@ public:
         project.addChild (logicsToValueTree (rootPipeLogics), -1, nullptr);
         project.addChild (clocksToValueTree (sequencingClocks), -1, nullptr);
         project.addChild (modulationToValueTree (modulators, modulationConnections), -1, nullptr);
+        project.addChild (assembliesToValueTree (savedAssemblies), -1, nullptr);
         project.addChild (discsToValueTree (rootDiscs), -1, nullptr);
         return project;
     }
@@ -4760,6 +5130,7 @@ public:
         auto newClocks = defaultSequencingClocks();
         std::vector<Modulator> newModulators;
         std::vector<ModulationConnection> newModulationConnections;
+        std::vector<SavedAssembly> newAssemblies;
         std::vector<Disc> newDiscs;
         if (! routesFromValueTree (project.getChildWithName ("routes"), newRoutes)
             || ! tapsFromValueTree (project.getChildWithName ("pipeTaps"), newTaps)
@@ -4773,6 +5144,7 @@ public:
             || ! logicsFromValueTree (project.getChildWithName ("pipeLogics"), newLogics)
             || ! clocksFromValueTree (project.getChildWithName ("sequencingClocks"), newClocks)
             || ! modulationFromValueTree (project.getChildWithName ("modulation"), newModulators, newModulationConnections)
+            || ! assembliesFromValueTree (project.getChildWithName ("assemblies"), newAssemblies)
             || ! discsFromValueTree (project.getChildWithName ("discs"), newDiscs))
             return false;
         rootRoutes = std::move (newRoutes);
@@ -4788,6 +5160,7 @@ public:
         sequencingClocks = std::move (newClocks);
         modulators = std::move (newModulators);
         modulationConnections = std::move (newModulationConnections);
+        savedAssemblies = std::move (newAssemblies);
         rootDiscs = std::move (newDiscs);
         normalisePipeJunctions (rootRoutes);
         normaliseNestedPipeJunctions (rootDiscs);
@@ -4801,6 +5174,7 @@ public:
     }
 
 private:
+    std::vector<SavedAssembly> savedAssemblies;
     std::vector<RoadRoute> rootRoutes;
     std::vector<PipeTap> rootPipeTaps;
     std::vector<PipeDrain> rootPipeDrains;
@@ -4903,7 +5277,18 @@ private:
         pastePositioned (clipboardTaps, pipeTaps(), selectionTap); pastePositioned (clipboardDrains, pipeDrains(), selectionDrain);
         pastePositioned (clipboardCloners, pipeCloners(), selectionCloner); pastePositioned (clipboardSpeedLimits, pipeSpeedLimits(), selectionSpeedLimit);
         pastePositioned (clipboardWaits, pipeWaits(), selectionWait); pastePositioned (clipboardStrikes, pipeStrikes(), selectionStrike);
-        for (auto item : clipboardTeleports) { item.position += offset; item.id = juce::Uuid().toString(); item.destinationId.clear(); pipeTeleports().push_back (item); selectedItems.insert (selectionKey (selectionTeleport, static_cast<int> (pipeTeleports().size()) - 1)); }
+        std::map<juce::String, juce::String> teleportIdMap;
+        for (const auto& item : clipboardTeleports) teleportIdMap[item.id] = juce::Uuid().toString();
+        for (auto item : clipboardTeleports)
+        {
+            item.position += offset;
+            const auto oldDestination = item.destinationId;
+            item.id = teleportIdMap[item.id];
+            const auto mappedDestination = teleportIdMap.find (oldDestination);
+            item.destinationId = mappedDestination != teleportIdMap.end() ? mappedDestination->second : juce::String();
+            pipeTeleports().push_back (item);
+            selectedItems.insert (selectionKey (selectionTeleport, static_cast<int> (pipeTeleports().size()) - 1));
+        }
         pastePositioned (clipboardFilters, pipeFilters(), selectionFilter);
         for (auto item : clipboardLogics)
         {
@@ -4911,6 +5296,11 @@ private:
             item.id = juce::Uuid().toString();
             item.count = 0;
             item.flipState = false;
+            item.inputAKey = item.inputBKey = -1;
+            item.inputABeat = item.inputBBeat = -1000.0;
+            item.inputAFlashUntilMs = item.inputBFlashUntilMs = item.outputFlashUntilMs = 0.0;
+            item.releaseHeldInput = false;
+            item.lastEvent = "Waiting";
             pipeLogics().push_back (item);
             selectedItems.insert (selectionKey (selectionLogic, static_cast<int> (pipeLogics().size()) - 1));
         }
@@ -4953,7 +5343,11 @@ private:
             else
             {
                 auto* self = const_cast<RoadCanvas*> (this);
-                if (const auto* position = self->selectionPosition (kind, index)) g.drawEllipse (juce::Rectangle<float> (30.0f, 30.0f).withCentre (*position), 1.5f);
+                if (const auto* position = self->selectionPosition (kind, index))
+                {
+                    const auto diameter = (compactDiscs ? gridSize * 0.55f : gridSize) + 6.0f;
+                    g.drawEllipse (juce::Rectangle<float> (diameter, diameter).withCentre (*position), 1.5f);
+                }
             }
         }
         if (marqueeSelecting)
@@ -5010,10 +5404,12 @@ private:
     juce::Point<float> viewOffset { 0.0f, 0.0f };
     juce::Point<float> panStartScreen;
     juce::Point<float> panStartOffset;
-    struct FlowPulse { int routeIndex = -1; float distance = 0.0f; int lastDisc = -1; double speed = 1.0; double probability = 1.0; bool reverse = false; int lastDrain = -1; int lastCloner = -1; int lastSpeedLimit = -1; int lastWait = -1; double waitBeatsRemaining = 0.0; int lastStrike = -1; int lastTeleport = -1; int lastFilter = -1; int lastLogic = -1; int heldByDisc = -1; };
+    struct FlowPulse { int routeIndex = -1; float distance = 0.0f; int lastDisc = -1; double speed = 1.0; double probability = 1.0; bool reverse = false; int lastDrain = -1; int lastCloner = -1; int lastSpeedLimit = -1; int lastWait = -1; double waitBeatsRemaining = 0.0; int lastStrike = -1; int lastTeleport = -1; int lastFilter = -1; int lastLogic = -1; int heldByDisc = -1; int heldByLogic = -1; double logicHoldStartedBeat = 0.0; int heldIncomingRoute = -1; int heldIncomingFromNode = -1; juce::Point<float> heldJunction; int bypassLogic = -1; bool randomLogicExit = false; };
     std::vector<FlowPulse> flowPulses;
     struct FlowDebugEvent { juce::Point<float> position; juce::String text; double expiresMs = 0.0; };
     std::vector<FlowDebugEvent> flowDebugEvents;
+    struct LogicSignalTrace { juce::Point<float> from, to; double expiresMs = 0.0; };
+    std::vector<LogicSignalTrace> logicSignalTraces;
     std::map<juce::String, double> discFlashUntil;
     bool flowRunning = false;
     double flowBpm = 120.0;
@@ -5331,6 +5727,11 @@ private:
             child.setProperty ("branch", static_cast<int> (logic.branch), nullptr);
             child.setProperty ("target", logic.targetCount, nullptr);
             child.setProperty ("speed", logic.compareSpeed, nullptr);
+            child.setProperty ("coincidence", logic.coincidenceBeats, nullptr);
+            child.setProperty ("levelHold", logic.levelHoldBeats, nullptr);
+            child.setProperty ("orientation", static_cast<int> (logic.orientation), nullptr);
+            child.setProperty ("signalMode", static_cast<int> (logic.signalMode), nullptr);
+            child.setProperty ("timeout", static_cast<int> (logic.timeoutAction), nullptr);
             child.setProperty ("open", logic.gateOpen, nullptr);
             child.setProperty ("enabled", logic.enabled, nullptr);
             child.setProperty ("id", logic.id, nullptr);
@@ -5348,15 +5749,68 @@ private:
             if (! child.hasType ("logic")) continue;
             PipeLogic logic;
             logic.position = { static_cast<float> (child["x"]), static_cast<float> (child["y"]) };
-            logic.mode = static_cast<PipeLogic::Mode> (juce::jlimit (0, 5, static_cast<int> (child.getProperty ("mode", 0))));
+            logic.mode = static_cast<PipeLogic::Mode> (juce::jlimit (0, 8, static_cast<int> (child.getProperty ("mode", 0))));
             logic.comparison = static_cast<PipeLogic::Comparison> (juce::jlimit (0, 4, static_cast<int> (child.getProperty ("comparison", 3))));
             logic.branch = static_cast<PipeLogic::Branch> (juce::jlimit (0, 3, static_cast<int> (child.getProperty ("branch", 1))));
             logic.targetCount = juce::jlimit (1, 64, static_cast<int> (child.getProperty ("target", 4)));
             logic.compareSpeed = juce::jlimit (0.125, 4.0, static_cast<double> (child.getProperty ("speed", 1.0)));
+            logic.coincidenceBeats = juce::jlimit (0.0625, 4.0, static_cast<double> (child.getProperty ("coincidence", 0.125)));
+            logic.levelHoldBeats = juce::jlimit (0.0625, 8.0, static_cast<double> (child.getProperty ("levelHold", 0.25)));
+            logic.orientation = static_cast<PipeLogic::Orientation> (juce::jlimit (0, 3, static_cast<int> (child.getProperty ("orientation", 0))));
+            logic.signalMode = static_cast<PipeLogic::SignalMode> (juce::jlimit (0, 1, static_cast<int> (child.getProperty ("signalMode", 0))));
+            logic.timeoutAction = static_cast<PipeLogic::TimeoutAction> (juce::jlimit (0, 3, static_cast<int> (child.getProperty ("timeout", 0))));
             logic.gateOpen = static_cast<bool> (child.getProperty ("open", true));
             logic.enabled = static_cast<bool> (child.getProperty ("enabled", true));
             logic.id = child.getProperty ("id", logic.id).toString();
             destination.push_back (logic);
+        }
+        return true;
+    }
+
+    static juce::ValueTree assembliesToValueTree (const std::vector<SavedAssembly>& source)
+    {
+        juce::ValueTree tree ("assemblies");
+        for (const auto& assembly : source)
+        {
+            juce::ValueTree child ("assembly");
+            child.setProperty ("name", assembly.name, nullptr);
+            child.addChild (routesToValueTree (assembly.routes), -1, nullptr);
+            child.addChild (tapsToValueTree (assembly.taps), -1, nullptr);
+            child.addChild (drainsToValueTree (assembly.drains), -1, nullptr);
+            child.addChild (clonersToValueTree (assembly.cloners), -1, nullptr);
+            child.addChild (speedLimitsToValueTree (assembly.speedLimits), -1, nullptr);
+            child.addChild (waitsToValueTree (assembly.waits), -1, nullptr);
+            child.addChild (strikesToValueTree (assembly.strikes), -1, nullptr);
+            child.addChild (teleportsToValueTree (assembly.teleports), -1, nullptr);
+            child.addChild (filtersToValueTree (assembly.filters), -1, nullptr);
+            child.addChild (logicsToValueTree (assembly.logics), -1, nullptr);
+            child.addChild (discsToValueTree (assembly.discs), -1, nullptr);
+            tree.addChild (child, -1, nullptr);
+        }
+        return tree;
+    }
+
+    static bool assembliesFromValueTree (const juce::ValueTree& tree, std::vector<SavedAssembly>& destination)
+    {
+        if (! tree.isValid()) return true;
+        if (! tree.hasType ("assemblies")) return false;
+        for (const auto& child : tree)
+        {
+            if (! child.hasType ("assembly")) continue;
+            SavedAssembly assembly;
+            assembly.name = child.getProperty ("name", "Assembly").toString();
+            if (! routesFromValueTree (child.getChildWithName ("routes"), assembly.routes)
+                || ! tapsFromValueTree (child.getChildWithName ("pipeTaps"), assembly.taps)
+                || ! drainsFromValueTree (child.getChildWithName ("pipeDrains"), assembly.drains)
+                || ! clonersFromValueTree (child.getChildWithName ("pipeCloners"), assembly.cloners)
+                || ! speedLimitsFromValueTree (child.getChildWithName ("pipeSpeedLimits"), assembly.speedLimits)
+                || ! waitsFromValueTree (child.getChildWithName ("pipeWaits"), assembly.waits)
+                || ! strikesFromValueTree (child.getChildWithName ("pipeStrikes"), assembly.strikes)
+                || ! teleportsFromValueTree (child.getChildWithName ("pipeTeleports"), assembly.teleports)
+                || ! filtersFromValueTree (child.getChildWithName ("pipeFilters"), assembly.filters)
+                || ! logicsFromValueTree (child.getChildWithName ("pipeLogics"), assembly.logics)
+                || ! discsFromValueTree (child.getChildWithName ("discs"), assembly.discs)) return false;
+            destination.push_back (std::move (assembly));
         }
         return true;
     }
@@ -6495,11 +6949,41 @@ private:
             const auto oldMode = safeThis->pipeLogics()[static_cast<size_t> (index)].mode;
             const auto count = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].count : 0;
             const auto flipState = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].flipState : false;
+            const auto inputAKey = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].inputAKey : -1;
+            const auto inputBKey = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].inputBKey : -1;
+            const auto inputABeat = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].inputABeat : -1000.0;
+            const auto inputBBeat = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].inputBBeat : -1000.0;
+            const auto inputAFlash = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].inputAFlashUntilMs : 0.0;
+            const auto inputBFlash = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].inputBFlashUntilMs : 0.0;
+            const auto outputFlash = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].outputFlashUntilMs : 0.0;
+            const auto releaseHeld = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].releaseHeldInput : false;
+            const auto lastEvent = oldMode == updated.mode ? safeThis->pipeLogics()[static_cast<size_t> (index)].lastEvent : juce::String ("Waiting");
             safeThis->pipeLogics()[static_cast<size_t> (index)] = updated;
             safeThis->pipeLogics()[static_cast<size_t> (index)].count = count;
             safeThis->pipeLogics()[static_cast<size_t> (index)].flipState = flipState;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].inputAKey = inputAKey;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].inputBKey = inputBKey;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].inputABeat = inputABeat;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].inputBBeat = inputBBeat;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].inputAFlashUntilMs = inputAFlash;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].inputBFlashUntilMs = inputBFlash;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].outputFlashUntilMs = outputFlash;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].releaseHeldInput = releaseHeld;
+            safeThis->pipeLogics()[static_cast<size_t> (index)].lastEvent = lastEvent;
             safeThis->notifyChanged();
             safeThis->repaint();
+        }, [safeThis, index]
+        {
+            if (safeThis != nullptr && juce::isPositiveAndBelow (index, static_cast<int> (safeThis->pipeLogics().size())))
+                return safeThis->pipeLogics()[static_cast<size_t> (index)];
+            return PipeLogic {};
+        }, [safeThis, index]
+        {
+            if (safeThis == nullptr || ! juce::isPositiveAndBelow (index, static_cast<int> (safeThis->pipeLogics().size())))
+                return juce::String ("Disconnected");
+            const auto& item = safeThis->pipeLogics()[static_cast<size_t> (index)];
+            const auto status = safeThis->logicConnectionStatus (item.position, item.orientation);
+            return juce::String (status.inputCount) + "/2 inputs  ·  output " + (status.outputConnected ? "connected" : "missing");
         });
         const auto screenPoint = juce::Point<float> (logic.position.x * viewScale + viewOffset.x,
                                                       logic.position.y * viewScale + viewOffset.y).roundToInt();
@@ -6536,6 +7020,18 @@ private:
                                      int ignoredRoute = -1,
                                      int ignoredNode = -1) const
     {
+        if (tool == Tool::pipe || tool == Tool::warpPipe)
+        {
+            auto nearestLogic = raw;
+            auto nearestDistance = snapRadius;
+            for (const auto& logic : pipeLogics())
+            {
+                const auto distance = raw.getDistanceFrom (logic.position);
+                if (distance < nearestDistance) { nearestDistance = distance; nearestLogic = logic.position; }
+            }
+            if (nearestLogic != raw) return nearestLogic;
+        }
+
         if (! snapEnabled)
             return raw;
 
@@ -7170,40 +7666,175 @@ private:
         return -1;
     }
 
-    bool logicPasses (PipeLogic& logic, FlowPulse& pulse, int outgoingCount)
+    struct LogicConnectionStatus
     {
+        int inputCount = 0;
+        int totalDirections = 0;
+        bool outputConnected = false;
+    };
+
+    static juce::Point<float> logicOutputDirection (PipeLogic::Orientation orientation)
+    {
+        switch (orientation)
+        {
+            case PipeLogic::Orientation::right: return { 1.0f, 0.0f };
+            case PipeLogic::Orientation::down:  return { 0.0f, 1.0f };
+            case PipeLogic::Orientation::left:  return { -1.0f, 0.0f };
+            case PipeLogic::Orientation::up:    return { 0.0f, -1.0f };
+        }
+        return { 1.0f, 0.0f };
+    }
+
+    static float logicOrientationAngle (PipeLogic::Orientation orientation)
+    {
+        return static_cast<float> (static_cast<int> (orientation)) * juce::MathConstants<float>::halfPi;
+    }
+
+    LogicConnectionStatus logicConnectionStatus (juce::Point<float> position, PipeLogic::Orientation orientation) const
+    {
+        std::vector<juce::Point<float>> directions;
+        for (const auto& route : routes())
+        {
+            if (! route.isPipe) continue;
+            for (int node = 0; node < static_cast<int> (route.points.size()); ++node)
+            {
+                if (! pointsTouch (route.points[static_cast<size_t> (node)], position)) continue;
+                for (const auto adjacent : { node - 1, node + 1 })
+                {
+                    if (! juce::isPositiveAndBelow (adjacent, static_cast<int> (route.points.size()))) continue;
+                    auto direction = route.points[static_cast<size_t> (adjacent)] - position;
+                    const auto length = direction.getDistanceFromOrigin();
+                    if (length <= 0.001f) continue;
+                    direction /= length;
+                    const auto duplicate = std::any_of (directions.begin(), directions.end(), [direction] (const auto existing)
+                    {
+                        return direction.x * existing.x + direction.y * existing.y > 0.999f;
+                    });
+                    if (! duplicate) directions.push_back (direction);
+                }
+            }
+        }
+        LogicConnectionStatus status;
+        status.totalDirections = static_cast<int> (directions.size());
+        const auto output = logicOutputDirection (orientation);
+        for (const auto direction : directions)
+        {
+            if (direction.x * output.x + direction.y * output.y > 0.5f) status.outputConnected = true;
+            else ++status.inputCount;
+        }
+        status.inputCount = juce::jmin (2, status.inputCount);
+        return status;
+    }
+
+    int connectedPipeDirectionCount (juce::Point<float> position) const
+    {
+        for (const auto& logic : pipeLogics())
+            if (logic.position.getDistanceFrom (position) <= 0.01f)
+                return logicConnectionStatus (position, logic.orientation).totalDirections;
+        return 0;
+    }
+
+    enum class LogicDecision { pass, block, hold };
+
+    LogicDecision logicPasses (PipeLogic& logic, FlowPulse& pulse, int outgoingCount, int inputKey)
+    {
+        const auto result = [] (bool passes) { return passes ? LogicDecision::pass : LogicDecision::block; };
         switch (logic.mode)
         {
             case PipeLogic::Mode::gate:
-                return hasModulationConnection (ModulationTargetKind::logic, logic.id, 0)
+                return result (hasModulationConnection (ModulationTargetKind::logic, logic.id, 0)
                            ? modulationSignal (ModulationTargetKind::logic, logic.id, 0) >= 0.0
-                           : logic.gateOpen;
+                           : logic.gateOpen);
             case PipeLogic::Mode::counter:
             {
                 const auto target = modulatedCountValue (logic.targetCount, ModulationTargetKind::logic, logic.id, 2, 1, 64);
                 logic.count = juce::jmin (target, logic.count + 1);
-                return logic.count >= target;
+                return result (logic.count >= target);
             }
             case PipeLogic::Mode::switcher:
-                return true;
+                return LogicDecision::pass;
             case PipeLogic::Mode::comparator:
             {
                 constexpr double epsilon = 0.0001;
                 const auto compareSpeed = modulatedRatioValue (logic.compareSpeed, ModulationTargetKind::logic, logic.id, 1, 0.125, 4.0);
-                if (logic.comparison == PipeLogic::Comparison::less) return pulse.speed < compareSpeed;
-                if (logic.comparison == PipeLogic::Comparison::lessOrEqual) return pulse.speed <= compareSpeed;
-                if (logic.comparison == PipeLogic::Comparison::equal) return std::abs (pulse.speed - compareSpeed) <= epsilon;
-                if (logic.comparison == PipeLogic::Comparison::greaterOrEqual) return pulse.speed >= compareSpeed;
-                return pulse.speed > compareSpeed;
+                if (logic.comparison == PipeLogic::Comparison::less) return result (pulse.speed < compareSpeed);
+                if (logic.comparison == PipeLogic::Comparison::lessOrEqual) return result (pulse.speed <= compareSpeed);
+                if (logic.comparison == PipeLogic::Comparison::equal) return result (std::abs (pulse.speed - compareSpeed) <= epsilon);
+                if (logic.comparison == PipeLogic::Comparison::greaterOrEqual) return result (pulse.speed >= compareSpeed);
+                return result (pulse.speed > compareSpeed);
             }
             case PipeLogic::Mode::flipFlop:
                 logic.flipState = ! logic.flipState;
-                return outgoingCount > 1 || logic.flipState;
+                return result (outgoingCount > 1 || logic.flipState);
             case PipeLogic::Mode::everyNth:
                 logic.count = logic.count >= logic.targetCount ? 1 : logic.count + 1;
-                return logic.count == logic.targetCount;
+                return result (logic.count == logic.targetCount);
+            case PipeLogic::Mode::andGate:
+            case PipeLogic::Mode::orGate:
+            case PipeLogic::Mode::xorGate:
+            {
+                const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+                if (logic.inputAKey < 0 || logic.inputAKey == inputKey)
+                    logic.inputAKey = inputKey;
+                else if (logic.inputBKey < 0 || logic.inputBKey == inputKey)
+                    logic.inputBKey = inputKey;
+                else
+                {
+                    // A newly connected approach replaces the older secondary input.
+                    logic.inputBKey = inputKey;
+                    logic.inputBBeat = -1000.0;
+                }
+
+                const auto activeWindow = logic.signalMode == PipeLogic::SignalMode::level
+                                            ? logic.levelHoldBeats : logic.coincidenceBeats;
+                const auto thisWasActive = inputKey == logic.inputAKey
+                                             ? flowBeatPosition - logic.inputABeat <= activeWindow
+                                             : flowBeatPosition - logic.inputBBeat <= activeWindow;
+                const auto otherWasActive = inputKey == logic.inputAKey
+                                              ? flowBeatPosition - logic.inputBBeat <= activeWindow
+                                              : flowBeatPosition - logic.inputABeat <= activeWindow;
+                if (inputKey == logic.inputAKey)
+                {
+                    logic.inputABeat = flowBeatPosition;
+                    logic.inputAFlashUntilMs = nowMs + 280.0;
+                }
+                else
+                {
+                    logic.inputBBeat = flowBeatPosition;
+                    logic.inputBFlashUntilMs = nowMs + 280.0;
+                }
+
+                if (logic.mode == PipeLogic::Mode::orGate)
+                {
+                    logic.outputFlashUntilMs = nowMs + 320.0;
+                    logic.lastEvent = "OR passed input";
+                    return LogicDecision::pass;
+                }
+                if (logic.mode == PipeLogic::Mode::xorGate)
+                {
+                    if (! otherWasActive) logic.outputFlashUntilMs = nowMs + 320.0;
+                    logic.lastEvent = otherWasActive ? "XOR blocked paired inputs" : "XOR passed single input";
+                    return result (! otherWasActive);
+                }
+                if (! otherWasActive)
+                {
+                    if (thisWasActive)
+                    {
+                        logic.lastEvent = "AND ignored duplicate input";
+                        return LogicDecision::block;
+                    }
+                    logic.lastEvent = "AND holding first input";
+                    return LogicDecision::hold;
+                }
+
+                logic.inputABeat = logic.inputBBeat = -1000.0;
+                logic.outputFlashUntilMs = nowMs + 320.0;
+                logic.releaseHeldInput = true;
+                logic.lastEvent = "AND matched both inputs";
+                return LogicDecision::block;
+            }
         }
-        return true;
+        return LogicDecision::pass;
     }
 
     int chooseOutgoingWay (FlowPulse& pulse, juce::Point<float> junction, int incomingRoute,
@@ -7217,10 +7848,93 @@ private:
 
         auto& logic = pipeLogics()[static_cast<size_t> (logicIndex)];
         pulse.lastLogic = logicIndex;
-        if (! logicPasses (logic, pulse, static_cast<int> (ways.size())))
+        auto inputKey = incomingRoute * 2;
+        auto incomingBranchDirection = juce::Point<float> (-1.0f, 0.0f);
+        if (juce::isPositiveAndBelow (incomingRoute, static_cast<int> (routes().size())))
+        {
+            const auto& incoming = routes()[static_cast<size_t> (incomingRoute)];
+            auto junctionNode = 0;
+            for (int node = 0; node < static_cast<int> (incoming.points.size()); ++node)
+                if (pointsTouch (incoming.points[static_cast<size_t> (node)], junction)) { junctionNode = node; break; }
+            if (incomingFromNode > junctionNode) ++inputKey;
+            if (juce::isPositiveAndBelow (incomingFromNode, static_cast<int> (incoming.points.size())))
+            {
+                incomingBranchDirection = incoming.points[static_cast<size_t> (incomingFromNode)] - junction;
+                const auto length = incomingBranchDirection.getDistanceFromOrigin();
+                if (length > 0.001f) incomingBranchDirection /= length;
+            }
+        }
+        const auto binaryGate = logic.mode == PipeLogic::Mode::andGate
+                             || logic.mode == PipeLogic::Mode::orGate
+                             || logic.mode == PipeLogic::Mode::xorGate;
+        const auto outputDirection = logicOutputDirection (logic.orientation);
+        if (binaryGate && incomingBranchDirection.x * outputDirection.x + incomingBranchDirection.y * outputDirection.y > 0.5f)
+        {
+            if (flowDebugVisible)
+                flowDebugEvents.push_back ({ junction, "Drop entered Logic through its output", juce::Time::getMillisecondCounterHiRes() + 1600.0 });
+            return -1;
+        }
+        const auto bypass = pulse.bypassLogic == logicIndex;
+        if (bypass) pulse.bypassLogic = -1;
+        const auto gateResult = bypass ? LogicDecision::pass
+                                       : logicPasses (logic, pulse, static_cast<int> (ways.size()), inputKey);
+        if (gateResult == LogicDecision::hold)
+        {
+            pulse.heldByLogic = logicIndex;
+            pulse.logicHoldStartedBeat = flowBeatPosition;
+            pulse.heldIncomingRoute = incomingRoute;
+            pulse.heldIncomingFromNode = incomingFromNode;
+            pulse.heldJunction = junction;
+            return -2;
+        }
+        if (gateResult == LogicDecision::block)
         {
             if (flowDebugVisible)
                 flowDebugEvents.push_back ({ junction, "Stopped by Logic", juce::Time::getMillisecondCounterHiRes() + 1400.0 });
+            return -1;
+        }
+
+        const auto isOrientedGate = logic.mode == PipeLogic::Mode::gate
+                                 || logic.mode == PipeLogic::Mode::andGate
+                                 || logic.mode == PipeLogic::Mode::orGate
+                                 || logic.mode == PipeLogic::Mode::xorGate;
+        if (isOrientedGate)
+        {
+            if (pulse.randomLogicExit)
+            {
+                pulse.randomLogicExit = false;
+                return juce::Random::getSystemRandom().nextInt (static_cast<int> (ways.size()));
+            }
+            auto outputIndex = -1;
+            auto outputScore = -std::numeric_limits<float>::max();
+            for (int i = 0; i < static_cast<int> (ways.size()); ++i)
+            {
+                const auto& way = ways[static_cast<size_t> (i)];
+                auto direction = routes()[static_cast<size_t> (way.routeIndex)].points[static_cast<size_t> (way.toNode)] - junction;
+                const auto length = direction.getDistanceFromOrigin();
+                if (length <= 0.001f) continue;
+                direction /= length;
+                const auto score = direction.x * outputDirection.x + direction.y * outputDirection.y;
+                if (score > outputScore) { outputScore = score; outputIndex = i; }
+            }
+            if (outputIndex >= 0 && outputScore > 0.5f)
+            {
+                auto destination = junction + outputDirection * gridSize;
+                const auto routeIndex = ways[static_cast<size_t> (outputIndex)].routeIndex;
+                auto nearest = std::numeric_limits<float>::max();
+                for (int i = 0; i < static_cast<int> (pipeLogics().size()); ++i)
+                {
+                    if (i == logicIndex) continue;
+                    const auto& nextLogic = pipeLogics()[static_cast<size_t> (i)];
+                    const auto hit = findNearestSegment (nextLogic.position, gridSize * 0.12f, -1, 1);
+                    const auto distance = nextLogic.position.getDistanceFrom (junction);
+                    if (hit.route == routeIndex && distance < nearest) { nearest = distance; destination = nextLogic.position; }
+                }
+                logicSignalTraces.push_back ({ junction, destination, juce::Time::getMillisecondCounterHiRes() + 420.0 });
+                return outputIndex;
+            }
+            if (flowDebugVisible)
+                flowDebugEvents.push_back ({ junction, "Logic needs a pipe on its output side", juce::Time::getMillisecondCounterHiRes() + 1800.0 });
             return -1;
         }
 
@@ -7288,6 +8002,7 @@ private:
                 }
                 const auto chosenIndex = chooseOutgoingWay (pulse, route.points[static_cast<size_t> (destinationNode)],
                                                             pulse.routeIndex, incomingNode, ways);
+                if (chosenIndex == -2) return;
                 if (chosenIndex < 0) { pulse.routeIndex = -1; return; }
                 const auto& chosen = ways[static_cast<size_t> (chosenIndex)];
                 pulse.routeIndex = chosen.routeIndex;
@@ -7333,12 +8048,39 @@ private:
 
             const auto chosenIndex = chooseOutgoingWay (pulse, route.points[static_cast<size_t> (nextNode)],
                                                         pulse.routeIndex, incomingFromNode, ways);
+            if (chosenIndex == -2) return;
             if (chosenIndex < 0) { pulse.routeIndex = -1; return; }
             const auto& chosen = ways[static_cast<size_t> (chosenIndex)];
             pulse.routeIndex = chosen.routeIndex;
             pulse.reverse = chosen.toNode < chosen.fromNode;
             pulse.distance = routeNodeDistances (routes()[static_cast<size_t> (chosen.routeIndex)])[static_cast<size_t> (chosen.fromNode)];
         }
+    }
+
+    bool routeReleasedLogicPulse (FlowPulse& pulse, int logicIndex, bool randomExit)
+    {
+        if (! juce::isPositiveAndBelow (pulse.heldIncomingRoute, static_cast<int> (routes().size()))) return false;
+        const auto& incoming = routes()[static_cast<size_t> (pulse.heldIncomingRoute)];
+        auto junctionNode = -1;
+        for (int node = 0; node < static_cast<int> (incoming.points.size()); ++node)
+            if (pointsTouch (incoming.points[static_cast<size_t> (node)], pulse.heldJunction)) { junctionNode = node; break; }
+        if (junctionNode < 0) return false;
+
+        auto ways = outgoingWays (pulse.heldJunction, pulse.heldIncomingRoute,
+                                  pulse.heldIncomingFromNode, junctionNode);
+        if (ways.empty()) return false;
+        pulse.bypassLogic = logicIndex;
+        pulse.lastLogic = -1;
+        pulse.randomLogicExit = randomExit;
+        const auto chosenIndex = chooseOutgoingWay (pulse, pulse.heldJunction, pulse.heldIncomingRoute,
+                                                    pulse.heldIncomingFromNode, ways);
+        if (! juce::isPositiveAndBelow (chosenIndex, static_cast<int> (ways.size()))) return false;
+        const auto& chosen = ways[static_cast<size_t> (chosenIndex)];
+        pulse.routeIndex = chosen.routeIndex;
+        pulse.reverse = chosen.toNode < chosen.fromNode;
+        pulse.distance = routeNodeDistances (routes()[static_cast<size_t> (chosen.routeIndex)])[static_cast<size_t> (chosen.fromNode)];
+        pulse.heldIncomingRoute = pulse.heldIncomingFromNode = -1;
+        return true;
     }
 
     void resetFlowPulses()
@@ -7356,7 +8098,15 @@ private:
                                      : 0.0;
         }
         for (auto& logic : pipeLogics())
-        { logic.count = 0; logic.flipState = false; }
+        {
+            logic.count = 0;
+            logic.flipState = false;
+            logic.inputAKey = logic.inputBKey = -1;
+            logic.inputABeat = logic.inputBBeat = -1000.0;
+            logic.inputAFlashUntilMs = logic.inputBFlashUntilMs = logic.outputFlashUntilMs = 0.0;
+            logic.releaseHeldInput = false;
+            logic.lastEvent = "Waiting";
+        }
     }
 
     void emitDueTapDrops()
@@ -7392,7 +8142,13 @@ private:
                     : juce::jlimit (0.25, 4.0, tap.speed);
                 const auto dropSpeed = modulatedRatioValue (baseSpeed, ModulationTargetKind::tap, tap.id, 1, 0.25, 4.0);
                 const auto dropChance = modulatedUnitValue (tap.probability, ModulationTargetKind::tap, tap.id, 0);
-                flowPulses.push_back ({ hit.route, distance, -1, dropSpeed, dropChance, tap.reverse });
+                FlowPulse pulse;
+                pulse.routeIndex = hit.route;
+                pulse.distance = distance;
+                pulse.speed = dropSpeed;
+                pulse.probability = dropChance;
+                pulse.reverse = tap.reverse;
+                flowPulses.push_back (std::move (pulse));
                 ++tap.emittedDrops;
                 const auto interval = tap.randomInterval
                     ? juce::jmap (juce::Random::getSystemRandom().nextDouble(),
@@ -7419,6 +8175,54 @@ private:
         for (auto& pulse : flowPulses)
         {
             if (! juce::isPositiveAndBelow (pulse.routeIndex, static_cast<int> (routes().size()))) continue;
+            if (pulse.heldByLogic >= 0)
+            {
+                if (! juce::isPositiveAndBelow (pulse.heldByLogic, static_cast<int> (pipeLogics().size())))
+                {
+                    pulse.heldByLogic = -1;
+                }
+                else
+                {
+                    auto& logic = pipeLogics()[static_cast<size_t> (pulse.heldByLogic)];
+                    const auto logicIndex = pulse.heldByLogic;
+                    if (logic.releaseHeldInput)
+                    {
+                        logic.releaseHeldInput = false;
+                        pulse.heldByLogic = -1;
+                        if (! routeReleasedLogicPulse (pulse, logicIndex, false))
+                        {
+                            pulse.routeIndex = -1;
+                            continue;
+                        }
+                    }
+                    else if (flowBeatPosition - pulse.logicHoldStartedBeat >= (logic.signalMode == PipeLogic::SignalMode::level
+                                                                               ? logic.levelHoldBeats : logic.coincidenceBeats))
+                    {
+                        pulse.heldByLogic = -1;
+                        logic.inputABeat = logic.inputBBeat = -1000.0;
+                        if (logic.timeoutAction == PipeLogic::TimeoutAction::discard)
+                        {
+                            logic.lastEvent = "Held input timed out";
+                            pulse.routeIndex = -1;
+                            continue;
+                        }
+                        if (logic.timeoutAction == PipeLogic::TimeoutAction::reverse)
+                        {
+                            pulse.reverse = ! pulse.reverse;
+                            pulse.lastLogic = logicIndex;
+                            pulse.heldIncomingRoute = pulse.heldIncomingFromNode = -1;
+                        }
+                        else if (! routeReleasedLogicPulse (pulse, logicIndex,
+                                                           logic.timeoutAction == PipeLogic::TimeoutAction::reroute))
+                        {
+                            pulse.routeIndex = -1;
+                            continue;
+                        }
+                        logic.lastEvent = "Timeout action applied";
+                    }
+                    if (pulse.heldByLogic >= 0) continue;
+                }
+            }
             if (pulse.heldByDisc >= 0)
             {
                 const auto stillPlaying = onDiscPlaybackActive
@@ -7492,17 +8296,43 @@ private:
             if (hitLogic >= 0 && hitLogic != pulse.lastLogic)
             {
                 auto& logic = pipeLogics()[static_cast<size_t> (hitLogic)];
-                // Switches choose an exit at junctions. Away from a junction they
-                // simply pass, while flip-flops alternate pass/block.
-                const auto outgoingCount = logic.mode == PipeLogic::Mode::switcher ? 2 : 1;
-                if (! logicPasses (logic, pulse, outgoingCount))
+                const auto evaluatesAtJunction = connectedPipeDirectionCount (logic.position) > 2;
+                if (! evaluatesAtJunction)
                 {
-                    if (flowDebugVisible) flowDebugEvents.push_back ({ position, "Stopped by Logic", now + 1400.0 });
-                    pulse.routeIndex = -1;
-                    continue;
+                    const auto isBinaryGate = logic.mode == PipeLogic::Mode::andGate
+                                           || logic.mode == PipeLogic::Mode::orGate
+                                           || logic.mode == PipeLogic::Mode::xorGate;
+                    if (isBinaryGate)
+                    {
+                        logic.lastEvent = "Needs two inputs and an output";
+                        if (flowDebugVisible)
+                            flowDebugEvents.push_back ({ position, logic.lastEvent, now + 1400.0 });
+                        pulse.routeIndex = -1;
+                        continue;
+                    }
+
+                    // Switches choose an exit at junctions. Away from a junction they
+                    // simply pass, while flip-flops alternate pass/block.
+                    const auto outgoingCount = logic.mode == PipeLogic::Mode::switcher ? 2 : 1;
+                    const auto inputKey = pulse.routeIndex * 2 + (pulse.reverse ? 1 : 0);
+                    const auto gateResult = logicPasses (logic, pulse, outgoingCount, inputKey);
+                    if (gateResult == LogicDecision::hold)
+                    {
+                        pulse.heldByLogic = hitLogic;
+                        pulse.logicHoldStartedBeat = flowBeatPosition;
+                        continue;
+                    }
+                    if (gateResult == LogicDecision::block)
+                    {
+                        if (flowDebugVisible) flowDebugEvents.push_back ({ position, "Stopped by Logic", now + 1400.0 });
+                        pulse.routeIndex = -1;
+                        continue;
+                    }
+                    pulse.lastLogic = hitLogic;
                 }
+                else pulse.lastLogic = -1;
             }
-            pulse.lastLogic = hitLogic;
+            else if (hitLogic < 0) pulse.lastLogic = -1;
 
             auto hitWait = -1;
             for (int i = 0; i < static_cast<int> (pipeWaits().size()); ++i)
@@ -7620,7 +8450,20 @@ private:
             selectedFlowPulse = -1;
         flowDebugEvents.erase (std::remove_if (flowDebugEvents.begin(), flowDebugEvents.end(), [now] (const auto& event)
         { return event.expiresMs <= now; }), flowDebugEvents.end());
+        logicSignalTraces.erase (std::remove_if (logicSignalTraces.begin(), logicSignalTraces.end(), [now] (const auto& trace)
+        { return trace.expiresMs <= now; }), logicSignalTraces.end());
         repaint();
+    }
+
+    void drawLogicSignalTraces (juce::Graphics& g) const
+    {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        for (const auto& trace : logicSignalTraces)
+        {
+            const auto alpha = static_cast<float> (juce::jlimit (0.0, 1.0, (trace.expiresMs - now) / 420.0));
+            g.setColour (juce::Colour (0xff39f58a).withAlpha (alpha * 0.75f));
+            g.drawLine ({ trace.from, trace.to }, juce::jmax (2.0f, gridSize * 0.08f));
+        }
     }
 
     void drawFlowDebugEvents (juce::Graphics& g) const
@@ -11033,6 +11876,7 @@ public:
         applicationMenu.addItem (menuAbout, "About Blendings");
         juce::MenuBarModel::setMacMainMenu (this, &applicationMenu);
 #endif
+        applyUiTheme (false);
         updateProjectPresentation();
     }
 
@@ -11122,6 +11966,19 @@ public:
 
         g.setColour (subtleStroke().withAlpha (0.72f));
         g.drawHorizontalLine (toolbarHeight - 1, 0.0f, static_cast<float> (getWidth()));
+
+        if (isRainbowUiEnabled())
+        {
+            juce::ColourGradient spectrum (juce::Colour (0xffff1744), 0.0f, 0.0f,
+                                           juce::Colour (0xffa100ff), static_cast<float> (getWidth()), 0.0f, false);
+            spectrum.addColour (0.17, juce::Colour (0xffff5a00));
+            spectrum.addColour (0.34, juce::Colour (0xffffd600));
+            spectrum.addColour (0.51, juce::Colour (0xff00c853));
+            spectrum.addColour (0.68, juce::Colour (0xff00a8ff));
+            spectrum.addColour (0.84, juce::Colour (0xff3d3dff));
+            g.setGradientFill (spectrum);
+            g.fillRect (0, toolbarHeight - 3, getWidth(), 3);
+        }
 
         if (! transportBarBounds.isEmpty())
         {
@@ -11385,17 +12242,28 @@ public:
             menu.addItem (menuPaste, "Paste\tCmd+V");
             menu.addItem (menuDuplicate, "Duplicate\tCmd+D");
             menu.addSeparator();
+            menu.addItem (menuSaveAssembly, "Create Assembly from Selection");
+            const auto assemblyNames = canvas.assemblyNames();
+            if (! assemblyNames.isEmpty())
+            {
+                juce::PopupMenu assemblies;
+                for (int i = 0; i < assemblyNames.size(); ++i) assemblies.addItem (menuAssemblyBase + i, assemblyNames[i]);
+                menu.addSubMenu ("Insert Assembly", assemblies);
+            }
+            menu.addSeparator();
             menu.addItem (menuToggleBypass, "Toggle Device Bypass\tB");
             menu.addSeparator();
             menu.addItem (menuClear, "Clear");
         }
         else if (index == 2)
         {
+            menu.addItem (menuRainbowUi, "Rainbow UI", true, rainbowMode);
+            menu.addSeparator();
             menu.addItem (menuMixer, "Mixer\tCmd+M");
             menu.addItem (menuClocks, "Multiple Clocks...");
             menu.addSeparator();
             menu.addItem (menuDimOrbitElements, "Dim Orbit Elements", true, orbitElementsDimmed);
-            menu.addItem (menuCompactDiscs, "Compact Discs", true, compactDiscs);
+            menu.addItem (menuCompactDiscs, "Compact Objects", true, compactDiscs);
             menu.addSeparator();
             menu.addItem (menuFlowDebug, "Flow Debug Overlay", true, flowDebugVisible);
         }
@@ -11413,10 +12281,24 @@ public:
         else if (itemId == menuCopy) canvas.copySelectedItems();
         else if (itemId == menuPaste) canvas.pasteSelectedItems();
         else if (itemId == menuDuplicate) canvas.duplicateSelectedItems();
+        else if (itemId == menuSaveAssembly)
+        {
+            if (canvas.saveSelectionAsAssembly()) menuItemsChanged();
+        }
+        else if (itemId >= menuAssemblyBase && itemId < menuAssemblyBase + 1000)
+        {
+            canvas.insertAssembly (itemId - menuAssemblyBase);
+        }
         else if (itemId == menuToggleBypass) { canvas.toggleSelectedDeviceBypass(); updateStatus(); }
         else if (itemId == menuClear) { canvas.clear(); updateStatus(); }
         else if (itemId == menuMixer) openMixerWindow();
         else if (itemId == menuClocks) openClockSettings();
+        else if (itemId == menuRainbowUi)
+        {
+            applyUiTheme (! rainbowMode);
+            markProjectDirty();
+            menuItemsChanged();
+        }
         else if (itemId == menuDimOrbitElements)
         {
             orbitElementsDimmed = ! orbitElementsDimmed;
@@ -11454,6 +12336,109 @@ public:
     }
 
 private:
+    void applyUiTheme (bool useRainbow)
+    {
+        rainbowMode = useRainbow;
+        setRainbowUiEnabled (rainbowMode);
+
+        const auto recolour = [&] (auto&& self, juce::Component& component) -> void
+        {
+            if (auto* label = dynamic_cast<juce::Label*> (&component))
+            {
+                const auto inCombo = dynamic_cast<juce::ComboBox*> (label->getParentComponent()) != nullptr;
+                label->setColour (juce::Label::textColourId,
+                                  inCombo || label->getFont().isBold() ? textPrimary() : textMuted());
+            }
+            if (auto* button = dynamic_cast<juce::TextButton*> (&component))
+            {
+                button->setColour (juce::TextButton::buttonColourId, raisedSurface());
+                button->setColour (juce::TextButton::buttonOnColourId, accentColour());
+                button->setColour (juce::TextButton::textColourOffId, textPrimary());
+                button->setColour (juce::TextButton::textColourOnId,
+                                   rainbowMode ? juce::Colours::white : appBackground());
+            }
+            if (auto* toggle = dynamic_cast<juce::ToggleButton*> (&component))
+            {
+                toggle->setColour (juce::ToggleButton::textColourId, textPrimary());
+                toggle->setColour (juce::ToggleButton::tickColourId, accentColour());
+                toggle->setColour (juce::ToggleButton::tickDisabledColourId, textMuted());
+            }
+            if (auto* box = dynamic_cast<juce::ComboBox*> (&component))
+            {
+                box->setColour (juce::ComboBox::backgroundColourId, raisedSurface());
+                box->setColour (juce::ComboBox::textColourId, textPrimary());
+                box->setColour (juce::ComboBox::outlineColourId, subtleStroke());
+                box->setColour (juce::ComboBox::arrowColourId, textMuted());
+            }
+            if (auto* editor = dynamic_cast<juce::TextEditor*> (&component))
+            {
+                editor->setColour (juce::TextEditor::backgroundColourId, appBackground());
+                editor->setColour (juce::TextEditor::textColourId, textPrimary());
+                editor->setColour (juce::TextEditor::outlineColourId, subtleStroke());
+                editor->setColour (juce::TextEditor::focusedOutlineColourId, accentColour());
+            }
+            if (auto* slider = dynamic_cast<juce::Slider*> (&component))
+            {
+                slider->setColour (juce::Slider::backgroundColourId, subtleStroke().withAlpha (0.46f));
+                slider->setColour (juce::Slider::trackColourId, accentColour());
+                slider->setColour (juce::Slider::thumbColourId,
+                                   rainbowMode ? juce::Colour (0xffff4f9a) : juce::Colours::white);
+                slider->setColour (juce::Slider::textBoxBackgroundColourId, appBackground());
+                slider->setColour (juce::Slider::textBoxTextColourId, textPrimary());
+                slider->setColour (juce::Slider::textBoxOutlineColourId, subtleStroke());
+            }
+
+            for (int i = 0; i < component.getNumChildComponents(); ++i)
+                if (auto* child = component.getChildComponent (i)) self (self, *child);
+            component.repaint();
+        };
+        recolour (recolour, *this);
+        auto& desktop = juce::Desktop::getInstance();
+        for (int i = 0; i < desktop.getNumComponents(); ++i)
+            if (auto* topLevel = desktop.getComponent (i); topLevel != nullptr && topLevel != getTopLevelComponent())
+                recolour (recolour, *topLevel);
+
+        static constexpr std::array<uint32_t, 15> rainbowAccents {{
+            0xff006cff, 0xff00c8b4, 0xff8a00ff, 0xff4f46e5, 0xffff006e,
+            0xff00c49a, 0xffff1744, 0xffa100ff, 0xffff8a00, 0xff0095ff,
+            0xffff005c, 0xff6a00ff, 0xff00b849, 0xffff4d00, 0xffff1e1e
+        }};
+        const std::array<IconButton*, 15> tools {{
+            &selectButton, &drawButton, &warpPipeButton, &editButton, &discButton,
+            &tapButton, &drainButton, &cloneButton, &speedLimitButton, &waitButton,
+            &strikeButton, &teleportButton, &filterButton, &logicButton, &eraseButton
+        }};
+        for (size_t i = 0; i < tools.size(); ++i)
+            tools[i]->setAccent (rainbowMode ? juce::Colour (rainbowAccents[i]) : accentColour());
+        modulatorButton.setAccent (rainbowMode ? juce::Colour (0xffa100ff) : accentColour());
+        modConnectButton.setAccent (rainbowMode ? juce::Colour (0xff00b8d9) : accentColour());
+        layersMainButton.setColour (juce::TextButton::buttonOnColourId, accentColour());
+        layersModulationButton.setColour (juce::TextButton::buttonOnColourId,
+                                          rainbowMode ? juce::Colour (0xffa100ff) : juce::Colour (0xffa96de8));
+
+        if (rainbowMode)
+        {
+            flowButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff00c853));
+            pauseButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffffb300));
+            stopButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffff1744));
+            clockButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff7c00ff));
+            flowButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            pauseButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff101522));
+            stopButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            clockButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        }
+
+        minimalLookAndFeel.setColour (juce::PopupMenu::backgroundColourId, surfaceColour());
+        minimalLookAndFeel.setColour (juce::PopupMenu::textColourId, textPrimary());
+        minimalLookAndFeel.setColour (juce::PopupMenu::highlightedBackgroundColourId, accentColour());
+        minimalLookAndFeel.setColour (juce::PopupMenu::highlightedTextColourId, juce::Colours::white);
+        minimalLookAndFeel.setColour (juce::TooltipWindow::backgroundColourId, surfaceColour());
+        minimalLookAndFeel.setColour (juce::TooltipWindow::textColourId, textPrimary());
+        minimalLookAndFeel.setColour (juce::TooltipWindow::outlineColourId, subtleStroke());
+        refreshLayersPanel();
+        repaint();
+    }
+
     void closeApplicationWindow()
     {
         requestApplicationClose ([]
@@ -11464,8 +12449,10 @@ private:
     }
 
     enum { menuNewProject = 10001, menuOpenProject, menuSaveProject, menuSaveProjectAs, menuClose,
-           menuUndo, menuCopy, menuPaste, menuDuplicate, menuToggleBypass, menuClear, menuMixer, menuClocks, menuDimOrbitElements, menuCompactDiscs, menuFlowDebug };
+           menuUndo, menuCopy, menuPaste, menuDuplicate, menuSaveAssembly, menuToggleBypass, menuClear, menuRainbowUi, menuMixer, menuClocks,
+           menuDimOrbitElements, menuCompactDiscs, menuFlowDebug };
     static constexpr int menuAbout = 10100;
+    static constexpr int menuAssemblyBase = 11000;
     juce::PopupMenu applicationMenu;
     MinimalLookAndFeel minimalLookAndFeel;
     juce::TooltipWindow tooltipWindow { this, 500 };
@@ -11654,6 +12641,7 @@ private:
     juce::Rectangle<int> transportBarBounds;
     int transportSeparatorX = 0;
     bool transportRunning = false;
+    bool rainbowMode = false;
     bool orbitElementsDimmed = false;
     bool compactDiscs = false;
     bool flowDebugVisible = false;
@@ -12920,6 +13908,7 @@ private:
         globalTempoBpm = juce::jlimit (20.0, 400.0, static_cast<double> (project.getProperty ("globalTempo", 120.0)));
         gridUnitChoice = juce::jlimit (1, 8, static_cast<int> (project.getProperty ("gridUnit", 5)));
         triggerQuantizeChoice = juce::jlimit (0, 5, static_cast<int> (project.getProperty ("triggerQuantize", 0)));
+        applyUiTheme (static_cast<bool> (project.getProperty ("rainbowUi", false)));
         tempoEditor.setText (juce::String (globalTempoBpm, globalTempoBpm == std::round (globalTempoBpm) ? 0 : 1), false);
         gridUnitBox.setSelectedId (gridUnitChoice, juce::dontSendNotification);
         triggerQuantizeSlider.setValue (triggerQuantizeChoice, juce::dontSendNotification);
@@ -12965,6 +13954,7 @@ private:
         project.setProperty ("gridUnit", gridUnitChoice, nullptr);
         project.setProperty ("triggerQuantize", triggerQuantizeChoice, nullptr);
         project.setProperty ("masterGain", masterGain.load(), nullptr);
+        project.setProperty ("rainbowUi", rainbowMode, nullptr);
         const auto xml = project.createXml();
         if (xml == nullptr || ! file.replaceWithText (xml->toString())) return false;
         currentProjectFile = file; projectDirty = false; updateProjectPresentation();

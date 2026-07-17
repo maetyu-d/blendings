@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.2.0 LANGUAGES C CXX)
+project(Blendings VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -148,6 +148,14 @@ add_custom_command(TARGET Blendings POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/PdPatchEditor.html"
         "$<TARGET_FILE_DIR:Blendings>/../Resources/PdPatchEditor.html")
+
+# JUCE applies an ad-hoc linker signature before post-build resources are copied.
+# Reseal the complete bundle so local and release-candidate app bundles verify.
+if(APPLE)
+    add_custom_command(TARGET Blendings POST_BUILD
+        COMMAND /usr/bin/codesign --force --deep --sign -
+            "$<TARGET_FILE_DIR:Blendings>/../..")
+endif()
 
 if (EXISTS "${SUPERCOLLIDER_INCLUDE_ROOT}/server/SC_WorldOptions.h")
     target_include_directories(Blendings SYSTEM PRIVATE
