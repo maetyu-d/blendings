@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.7.4 LANGUAGES C CXX)
+project(Blendings VERSION 0.7.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -103,6 +103,8 @@ juce_add_gui_app(Blendings
 juce_generate_juce_header(Blendings)
 
 target_sources(Blendings PRIVATE
+    Source/AppTheme.cpp
+    Source/AppTheme.h
     Source/EmbeddedScAudioEngine.cpp
     Source/EmbeddedScAudioEngine.h
     Source/CarouselEditorComponent.cpp
@@ -120,6 +122,7 @@ target_sources(Blendings PRIVATE
     Source/PdAudioEngine.h
     Source/PipeWorkspaceComponent.cpp
     Source/PipeWorkspaceComponent.h
+    Source/PipeToolSettings.h
     Source/ScSheetFormula.cpp
     Source/ScSheetFormula.h
     Source/ScSheetMath.cpp
@@ -130,6 +133,11 @@ target_sources(Blendings PRIVATE
     Source/ScSheetTableComponent.h
     Source/ScDiscAudioEngine.cpp
     Source/ScDiscAudioEngine.h
+    Source/SuperColliderTokeniser.cpp
+    Source/SuperColliderTokeniser.h
+    Source/WorkspaceModel.cpp
+    Source/WorkspaceModel.h
+    Source/WorkspaceInspectors.h
     Source/Main.cpp)
 
 target_compile_definitions(Blendings PRIVATE
@@ -189,6 +197,7 @@ juce_add_console_app(PlaybackEndToEndSmoke
     PRODUCT_NAME "Blendings Playback End-to-End Smoke")
 juce_generate_juce_header(PlaybackEndToEndSmoke)
 target_sources(PlaybackEndToEndSmoke PRIVATE
+    Source/AppTheme.cpp Source/AppTheme.h
     Source/EmbeddedScAudioEngine.cpp Source/EmbeddedScAudioEngine.h
     Source/CarouselEditorComponent.cpp Source/CarouselEditorComponent.h
     Source/GridEditorComponent.cpp Source/GridEditorComponent.h
@@ -203,6 +212,10 @@ target_sources(PlaybackEndToEndSmoke PRIVATE
     Source/ScSheetScore.cpp Source/ScSheetScore.h
     Source/ScSheetTableComponent.cpp Source/ScSheetTableComponent.h
     Source/ScDiscAudioEngine.cpp Source/ScDiscAudioEngine.h
+    Source/SuperColliderTokeniser.cpp Source/SuperColliderTokeniser.h
+    Source/WorkspaceModel.cpp Source/WorkspaceModel.h
+    Source/PipeToolSettings.h
+    Source/WorkspaceInspectors.h
     Source/Main.cpp)
 target_compile_definitions(PlaybackEndToEndSmoke PRIVATE
     BLENDINGS_PLAYBACK_SMOKE=1
