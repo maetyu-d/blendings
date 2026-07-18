@@ -2,6 +2,7 @@
 
 #include "GridEditorComponent.h"
 #include "CarouselEditorComponent.h"
+#include "InspectorStyle.h"
 #include "GridModel.h"
 #include "PipeWorkspaceComponent.h"
 #include "ScDiscAudioEngine.h"
@@ -12,11 +13,13 @@
 #include <cstddef>
 #include <cmath>
 #include <cstring>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -40,6 +43,47 @@ constexpr int dataPaneWidth = 380;
 constexpr int maxDiscElementsPerOrbitRing = 16;
 constexpr float discOrbitRingSpacing = 12.0f;
 constexpr const char* pdStdPathPrefix = "std:";
+
+class PointSpatialIndex
+{
+public:
+    explicit PointSpatialIndex (float size) : cellSize (juce::jmax (1.0f, size)) {}
+
+    template <typename Container, typename PositionGetter>
+    void rebuild (const Container& items, PositionGetter&& getPosition)
+    {
+        buckets.clear();
+        buckets.reserve (items.size() * 2);
+        for (int index = 0; index < static_cast<int> (items.size()); ++index)
+        {
+            const auto position = getPosition (items[static_cast<size_t> (index)]);
+            buckets[key (cell (position.x), cell (position.y))].push_back (index);
+        }
+    }
+
+    template <typename Predicate>
+    int findFirst (juce::Point<float> position, float radius, Predicate&& predicate) const
+    {
+        const auto minX = cell (position.x - radius), maxX = cell (position.x + radius);
+        const auto minY = cell (position.y - radius), maxY = cell (position.y + radius);
+        for (int y = minY; y <= maxY; ++y)
+            for (int x = minX; x <= maxX; ++x)
+                if (const auto found = buckets.find (key (x, y)); found != buckets.end())
+                    for (const auto index : found->second)
+                        if (predicate (index)) return index;
+        return -1;
+    }
+
+private:
+    int cell (float value) const { return static_cast<int> (std::floor (value / cellSize)); }
+    static std::int64_t key (int x, int y)
+    {
+        return (static_cast<std::int64_t> (x) << 32) ^ static_cast<std::uint32_t> (y);
+    }
+
+    float cellSize;
+    std::unordered_map<std::int64_t, std::vector<int>> buckets;
+};
 
 juce::File bundledPdExtraRoot()
 {
@@ -2778,6 +2822,19 @@ public:
         bool selected = false;
     };
 
+    struct PerformanceSnapshot { int pipes = 0, drops = 0, devices = 0; double flowUpdateMs = 0.0; size_t contactChecks = 0; };
+    PerformanceSnapshot getPerformanceSnapshot() const
+    {
+        PerformanceSnapshot result;
+        result.pipes = static_cast<int> (routes().size());
+        result.drops = static_cast<int> (flowPulses.size());
+        result.devices = static_cast<int> (discs().size() + pipeTaps().size() + pipeDrains().size()
+                         + pipeCloners().size() + pipeSpeedLimits().size() + pipeWaits().size()
+                         + pipeStrikes().size() + pipeTeleports().size() + pipeFilters().size() + pipeLogics().size());
+        result.flowUpdateMs = lastFlowUpdateMs; result.contactChecks = lastContactChecks;
+        return result;
+    }
+
     struct ScCodeInfo
     {
         bool valid = false;
@@ -2807,6 +2864,7 @@ public:
     {
         setWantsKeyboardFocus (true);
         setMouseCursor (juce::MouseCursor::CrosshairCursor);
+        flowPulses.reserve (maxFlowPulses);
         startTimerHz (60);
         lastCommittedState = createProjectState();
     }
@@ -3854,8 +3912,29 @@ public:
     {
         if (undoStates.empty()) return;
         const auto restoreModulationLayer = modulationLayerVisible;
+        redoStates.push_back (createProjectState());
+        if (redoStates.size() > 100) redoStates.erase (redoStates.begin());
         const auto state = undoStates.back();
         undoStates.pop_back();
+        restoringHistory = true;
+        applyProjectState (state);
+        restoringHistory = false;
+        modulationLayerVisible = restoreModulationLayer;
+        if (modulationLayerVisible) worldPath.clear();
+        lastCommittedState = createProjectState();
+        resetSelection();
+        if (onRoutesChanged != nullptr) onRoutesChanged();
+        repaint();
+    }
+
+    void redo()
+    {
+        if (redoStates.empty()) return;
+        const auto restoreModulationLayer = modulationLayerVisible;
+        undoStates.push_back (createProjectState());
+        if (undoStates.size() > 100) undoStates.erase (undoStates.begin());
+        const auto state = redoStates.back();
+        redoStates.pop_back();
         restoringHistory = true;
         applyProjectState (state);
         restoringHistory = false;
@@ -5113,10 +5192,12 @@ public:
         return project;
     }
 
-    bool applyProjectState (const juce::ValueTree& project)
+    bool applyProjectState (const juce::ValueTree& project, juce::StringArray* recoveryReport = nullptr)
     {
         if (! project.isValid() || ! project.hasType ("otherwareProject"))
             return false;
+        const auto version = static_cast<int> (project.getProperty ("version", 1));
+        if (version != 1) return false;
         std::vector<RoadRoute> newRoutes;
         std::vector<PipeTap> newTaps;
         std::vector<PipeDrain> newDrains;
@@ -5132,21 +5213,59 @@ public:
         std::vector<ModulationConnection> newModulationConnections;
         std::vector<SavedAssembly> newAssemblies;
         std::vector<Disc> newDiscs;
-        if (! routesFromValueTree (project.getChildWithName ("routes"), newRoutes)
-            || ! tapsFromValueTree (project.getChildWithName ("pipeTaps"), newTaps)
-            || ! drainsFromValueTree (project.getChildWithName ("pipeDrains"), newDrains)
-            || ! clonersFromValueTree (project.getChildWithName ("pipeCloners"), newCloners)
-            || ! speedLimitsFromValueTree (project.getChildWithName ("pipeSpeedLimits"), newSpeedLimits)
-            || ! waitsFromValueTree (project.getChildWithName ("pipeWaits"), newWaits)
-            || ! strikesFromValueTree (project.getChildWithName ("pipeStrikes"), newStrikes)
-            || ! teleportsFromValueTree (project.getChildWithName ("pipeTeleports"), newTeleports)
-            || ! filtersFromValueTree (project.getChildWithName ("pipeFilters"), newFilters)
-            || ! logicsFromValueTree (project.getChildWithName ("pipeLogics"), newLogics)
-            || ! clocksFromValueTree (project.getChildWithName ("sequencingClocks"), newClocks)
-            || ! modulationFromValueTree (project.getChildWithName ("modulation"), newModulators, newModulationConnections)
-            || ! assembliesFromValueTree (project.getChildWithName ("assemblies"), newAssemblies)
-            || ! discsFromValueTree (project.getChildWithName ("discs"), newDiscs))
-            return false;
+        const auto recoverSection = [&] (const char* name, auto parser, auto& destination)
+        {
+            const auto section = project.getChildWithName (name);
+            if (! section.isValid()) return;
+            if (! parser (section, destination))
+            {
+                destination.clear();
+                if (recoveryReport != nullptr) recoveryReport->add (juce::String (name) + " was damaged and was reset");
+            }
+        };
+        recoverSection ("routes", routesFromValueTree, newRoutes);
+        recoverSection ("pipeTaps", tapsFromValueTree, newTaps);
+        recoverSection ("pipeDrains", drainsFromValueTree, newDrains);
+        recoverSection ("pipeCloners", clonersFromValueTree, newCloners);
+        recoverSection ("pipeSpeedLimits", speedLimitsFromValueTree, newSpeedLimits);
+        recoverSection ("pipeWaits", waitsFromValueTree, newWaits);
+        recoverSection ("pipeStrikes", strikesFromValueTree, newStrikes);
+        recoverSection ("pipeTeleports", teleportsFromValueTree, newTeleports);
+        recoverSection ("pipeFilters", filtersFromValueTree, newFilters);
+        recoverSection ("pipeLogics", logicsFromValueTree, newLogics);
+        if (const auto section = project.getChildWithName ("sequencingClocks"); section.isValid()
+            && ! clocksFromValueTree (section, newClocks))
+        {
+            newClocks = defaultSequencingClocks();
+            if (recoveryReport != nullptr) recoveryReport->add ("sequencing clocks were damaged and were reset");
+        }
+        recoverSection ("assemblies", assembliesFromValueTree, newAssemblies);
+        recoverSection ("discs", discsFromValueTree, newDiscs);
+        if (const auto section = project.getChildWithName ("modulation"); section.isValid()
+            && ! modulationFromValueTree (section, newModulators, newModulationConnections))
+        {
+            newModulators.clear(); newModulationConnections.clear();
+            if (recoveryReport != nullptr) recoveryReport->add ("modulation was damaged and was reset");
+        }
+
+        const auto oldRouteCount = newRoutes.size();
+        newRoutes.erase (std::remove_if (newRoutes.begin(), newRoutes.end(), [] (const auto& route)
+        {
+            return route.points.size() < 2 || std::any_of (route.points.begin(), route.points.end(), [] (const auto& point)
+            {
+                return ! std::isfinite (point.x) || ! std::isfinite (point.y);
+            });
+        }), newRoutes.end());
+        if (newRoutes.size() != oldRouteCount && recoveryReport != nullptr)
+            recoveryReport->add (juce::String (oldRouteCount - newRoutes.size()) + " invalid pipe paths were removed");
+
+        const auto oldDiscCount = newDiscs.size();
+        newDiscs.erase (std::remove_if (newDiscs.begin(), newDiscs.end(), [] (const auto& disc)
+        {
+            return ! std::isfinite (disc.centre.x) || ! std::isfinite (disc.centre.y);
+        }), newDiscs.end());
+        if (newDiscs.size() != oldDiscCount && recoveryReport != nullptr)
+            recoveryReport->add (juce::String (oldDiscCount - newDiscs.size()) + " invalid discs were removed");
         rootRoutes = std::move (newRoutes);
         rootPipeTaps = std::move (newTaps);
         rootPipeDrains = std::move (newDrains);
@@ -5370,6 +5489,7 @@ private:
     bool restoringHistory = false;
     juce::ValueTree lastCommittedState;
     std::vector<juce::ValueTree> undoStates;
+    std::vector<juce::ValueTree> redoStates;
     bool drawing = false;
     bool draggingNode = false;
     bool panning = false;
@@ -5406,6 +5526,7 @@ private:
     juce::Point<float> panStartOffset;
     struct FlowPulse { int routeIndex = -1; float distance = 0.0f; int lastDisc = -1; double speed = 1.0; double probability = 1.0; bool reverse = false; int lastDrain = -1; int lastCloner = -1; int lastSpeedLimit = -1; int lastWait = -1; double waitBeatsRemaining = 0.0; int lastStrike = -1; int lastTeleport = -1; int lastFilter = -1; int lastLogic = -1; int heldByDisc = -1; int heldByLogic = -1; double logicHoldStartedBeat = 0.0; int heldIncomingRoute = -1; int heldIncomingFromNode = -1; juce::Point<float> heldJunction; int bypassLogic = -1; bool randomLogicExit = false; };
     std::vector<FlowPulse> flowPulses;
+    static constexpr size_t maxFlowPulses = 2048;
     struct FlowDebugEvent { juce::Point<float> position; juce::String text; double expiresMs = 0.0; };
     std::vector<FlowDebugEvent> flowDebugEvents;
     struct LogicSignalTrace { juce::Point<float> from, to; double expiresMs = 0.0; };
@@ -5415,6 +5536,8 @@ private:
     double flowBpm = 120.0;
     double flowBeatsPerGridUnit = 1.0;
     double lastFlowTimeMs = 0.0;
+    double lastFlowUpdateMs = 0.0;
+    size_t lastContactChecks = 0;
     double flowBeatPosition = 0.0;
 
     juce::String discKeyForCurrentWorld (int discIndex) const
@@ -8113,6 +8236,7 @@ private:
     {
         for (auto& tap : pipeTaps())
         {
+            if (flowPulses.size() >= maxFlowPulses) break;
             if (! tap.enabled || (tap.totalDrops > 0 && tap.emittedDrops >= tap.totalDrops)) continue;
             const SequencingClock* clock = nullptr;
             if (tap.clockIndex > 0 && juce::isPositiveAndBelow (tap.clockIndex - 1, static_cast<int> (sequencingClocks.size())))
@@ -8131,6 +8255,7 @@ private:
 
             for (int guard = 0; guard < 64 && clockBeatPosition + 0.0001 >= tap.nextEmissionBeat + swingDelay(); ++guard)
             {
+                if (flowPulses.size() >= maxFlowPulses) break;
                 if (tap.totalDrops > 0 && tap.emittedDrops >= tap.totalDrops) break;
                 const auto hit = findNearestSegment (tap.position, gridSize * 0.55f, -1, 1);
                 if (hit.route < 0) break;
@@ -8162,16 +8287,37 @@ private:
 
     void timerCallback() override
     {
+        const auto updateStarted = juce::Time::getMillisecondCounterHiRes();
         const auto now = juce::Time::getMillisecondCounterHiRes();
         const auto elapsed = lastFlowTimeMs > 0.0 ? juce::jlimit (0.0, 0.1, (now - lastFlowTimeMs) / 1000.0) : 0.0;
         lastFlowTimeMs = now;
-        if (! flowRunning || elapsed <= 0.0) return;
+        if (! flowRunning || elapsed <= 0.0) { lastFlowUpdateMs = 0.0; lastContactChecks = 0; return; }
         flowBeatPosition += elapsed * flowBpm / 60.0;
         emitDueTapDrops();
         // Drop velocity is beat-relative: 1x always travels one grid square per beat.
         const auto secondsPerBeat = 60.0 / flowBpm;
         const auto advance = static_cast<float> (elapsed * gridSize / secondsPerBeat);
+        const auto buildDeviceIndex = [] (const auto& devices, auto getPosition)
+        {
+            PointSpatialIndex index (gridSize);
+            index.rebuild (devices, getPosition);
+            return index;
+        };
+        const auto devicePosition = [] (const auto& device) { return device.position; };
+        const auto discPosition = [] (const auto& disc) { return disc.centre; };
+        const auto drainIndex = buildDeviceIndex (pipeDrains(), devicePosition);
+        const auto speedLimitIndex = buildDeviceIndex (pipeSpeedLimits(), devicePosition);
+        const auto filterIndex = buildDeviceIndex (pipeFilters(), devicePosition);
+        const auto waitIndex = buildDeviceIndex (pipeWaits(), devicePosition);
+        const auto strikeIndex = buildDeviceIndex (pipeStrikes(), devicePosition);
+        const auto teleportIndex = buildDeviceIndex (pipeTeleports(), devicePosition);
+        const auto clonerIndex = buildDeviceIndex (pipeCloners(), devicePosition);
+        const auto discSpatialIndex = buildDeviceIndex (discs(), discPosition);
+        lastContactChecks = flowPulses.size() * (pipeDrains().size() + pipeSpeedLimits().size() + pipeFilters().size()
+                            + pipeWaits().size() + pipeStrikes().size() + pipeTeleports().size()
+                            + pipeCloners().size() + discs().size());
         std::vector<FlowPulse> spawnedPulses;
+        spawnedPulses.reserve (juce::jmin ((size_t) 256, maxFlowPulses - juce::jmin (maxFlowPulses, flowPulses.size())));
         for (auto& pulse : flowPulses)
         {
             if (! juce::isPositiveAndBelow (pulse.routeIndex, static_cast<int> (routes().size()))) continue;
@@ -8239,13 +8385,11 @@ private:
             if (! juce::isPositiveAndBelow (pulse.routeIndex, static_cast<int> (routes().size()))) continue;
             const auto& route = routes()[static_cast<size_t> (pulse.routeIndex)];
             auto position = pointAlongRoute (route, pulse.distance);
-            auto hitDrain = -1;
-            for (int i = 0; i < static_cast<int> (pipeDrains().size()); ++i)
-                if (pipeDrains()[static_cast<size_t> (i)].enabled && pipeDrains()[static_cast<size_t> (i)].position.getDistanceFrom (position) <= gridSize * 0.38f)
-                {
-                    hitDrain = i;
-                    break;
-                }
+            const auto hitDrain = drainIndex.findFirst (position, gridSize * 0.38f, [&] (int i)
+            {
+                const auto& device = pipeDrains()[static_cast<size_t> (i)];
+                return device.enabled && device.position.getDistanceFrom (position) <= gridSize * 0.38f;
+            });
             if (hitDrain >= 0 && hitDrain != pulse.lastDrain
                 && juce::Random::getSystemRandom().nextDouble() < modulatedUnitValue (
                        pipeDrains()[static_cast<size_t> (hitDrain)].destructionProbability,
@@ -8257,13 +8401,11 @@ private:
             }
             pulse.lastDrain = hitDrain;
 
-            auto hitSpeedLimit = -1;
-            for (int i = 0; i < static_cast<int> (pipeSpeedLimits().size()); ++i)
-                if (pipeSpeedLimits()[static_cast<size_t> (i)].enabled && pipeSpeedLimits()[static_cast<size_t> (i)].position.getDistanceFrom (position) <= gridSize * 0.38f)
-                {
-                    hitSpeedLimit = i;
-                    break;
-                }
+            const auto hitSpeedLimit = speedLimitIndex.findFirst (position, gridSize * 0.38f, [&] (int i)
+            {
+                const auto& device = pipeSpeedLimits()[static_cast<size_t> (i)];
+                return device.enabled && device.position.getDistanceFrom (position) <= gridSize * 0.38f;
+            });
             if (hitSpeedLimit >= 0 && hitSpeedLimit != pulse.lastSpeedLimit)
             {
                 const auto& limit = pipeSpeedLimits()[static_cast<size_t> (hitSpeedLimit)];
@@ -8273,9 +8415,11 @@ private:
             }
             pulse.lastSpeedLimit = hitSpeedLimit;
 
-            auto hitFilter = -1;
-            for (int i = 0; i < static_cast<int> (pipeFilters().size()); ++i)
-                if (pipeFilters()[static_cast<size_t> (i)].enabled && pipeFilters()[static_cast<size_t> (i)].position.getDistanceFrom (position) <= gridSize * 0.38f) { hitFilter = i; break; }
+            const auto hitFilter = filterIndex.findFirst (position, gridSize * 0.38f, [&] (int i)
+            {
+                const auto& device = pipeFilters()[static_cast<size_t> (i)];
+                return device.enabled && device.position.getDistanceFrom (position) <= gridSize * 0.38f;
+            });
             if (hitFilter >= 0 && hitFilter != pulse.lastFilter)
             {
                 const auto& filter = pipeFilters()[static_cast<size_t> (hitFilter)];
@@ -8334,13 +8478,11 @@ private:
             }
             else if (hitLogic < 0) pulse.lastLogic = -1;
 
-            auto hitWait = -1;
-            for (int i = 0; i < static_cast<int> (pipeWaits().size()); ++i)
-                if (pipeWaits()[static_cast<size_t> (i)].enabled && pipeWaits()[static_cast<size_t> (i)].position.getDistanceFrom (position) <= gridSize * 0.38f)
-                {
-                    hitWait = i;
-                    break;
-                }
+            const auto hitWait = waitIndex.findFirst (position, gridSize * 0.38f, [&] (int i)
+            {
+                const auto& device = pipeWaits()[static_cast<size_t> (i)];
+                return device.enabled && device.position.getDistanceFrom (position) <= gridSize * 0.38f;
+            });
             if (hitWait >= 0 && hitWait != pulse.lastWait)
             {
                 const auto& wait = pipeWaits()[static_cast<size_t> (hitWait)];
@@ -8348,10 +8490,11 @@ private:
             }
             pulse.lastWait = hitWait;
 
-            auto hitStrike = -1;
-            for (int i = 0; i < static_cast<int> (pipeStrikes().size()); ++i)
-                if (pipeStrikes()[static_cast<size_t> (i)].enabled && pipeStrikes()[static_cast<size_t> (i)].position.getDistanceFrom (position) <= gridSize * 0.38f)
-                { hitStrike = i; break; }
+            const auto hitStrike = strikeIndex.findFirst (position, gridSize * 0.38f, [&] (int i)
+            {
+                const auto& device = pipeStrikes()[static_cast<size_t> (i)];
+                return device.enabled && device.position.getDistanceFrom (position) <= gridSize * 0.38f;
+            });
             if (hitStrike >= 0 && hitStrike != pulse.lastStrike && onDiscFlowTriggered)
             {
                 const auto& strike = pipeStrikes()[static_cast<size_t> (hitStrike)];
@@ -8372,10 +8515,11 @@ private:
             }
             pulse.lastStrike = hitStrike;
 
-            auto hitTeleport = -1;
-            for (int i = 0; i < static_cast<int> (pipeTeleports().size()); ++i)
-                if (pipeTeleports()[static_cast<size_t> (i)].enabled && pipeTeleports()[static_cast<size_t> (i)].position.getDistanceFrom (position) <= gridSize * 0.38f)
-                { hitTeleport = i; break; }
+            const auto hitTeleport = teleportIndex.findFirst (position, gridSize * 0.38f, [&] (int i)
+            {
+                const auto& device = pipeTeleports()[static_cast<size_t> (i)];
+                return device.enabled && device.position.getDistanceFrom (position) <= gridSize * 0.38f;
+            });
             if (hitTeleport >= 0 && hitTeleport != pulse.lastTeleport)
             {
                 auto teleported = false;
@@ -8412,25 +8556,24 @@ private:
             }
             else pulse.lastTeleport = hitTeleport;
 
-            auto hitCloner = -1;
-            for (int i = 0; i < static_cast<int> (pipeCloners().size()); ++i)
-                if (pipeCloners()[static_cast<size_t> (i)].enabled && pipeCloners()[static_cast<size_t> (i)].position.getDistanceFrom (position) <= gridSize * 0.38f)
-                {
-                    hitCloner = i;
-                    break;
-                }
-            if (hitCloner >= 0 && hitCloner != pulse.lastCloner && flowPulses.size() + spawnedPulses.size() < 2048)
+            const auto hitCloner = clonerIndex.findFirst (position, gridSize * 0.38f, [&] (int i)
+            {
+                const auto& device = pipeCloners()[static_cast<size_t> (i)];
+                return device.enabled && device.position.getDistanceFrom (position) <= gridSize * 0.38f;
+            });
+            if (hitCloner >= 0 && hitCloner != pulse.lastCloner && flowPulses.size() + spawnedPulses.size() < maxFlowPulses)
             {
                 auto clones = quantumClonesFor (pulse, pipeCloners()[static_cast<size_t> (hitCloner)]);
-                const auto room = static_cast<size_t> (2048) - flowPulses.size() - spawnedPulses.size();
+                const auto room = maxFlowPulses - flowPulses.size() - spawnedPulses.size();
                 if (clones.size() > room) clones.resize (room);
                 spawnedPulses.insert (spawnedPulses.end(), clones.begin(), clones.end());
             }
             pulse.lastCloner = hitCloner;
 
-            auto hitDisc = -1;
-            for (int i = 0; i < static_cast<int> (discs().size()); ++i)
-                if (discs()[static_cast<size_t> (i)].centre.getDistanceFrom (position) <= gridSize * 0.48f) { hitDisc = i; break; }
+            const auto hitDisc = discSpatialIndex.findFirst (position, gridSize * 0.48f, [&] (int i)
+            {
+                return discs()[static_cast<size_t> (i)].centre.getDistanceFrom (position) <= gridSize * 0.48f;
+            });
             if (hitDisc >= 0 && hitDisc != pulse.lastDisc && onDiscFlowTriggered
                 && juce::Random::getSystemRandom().nextDouble() <= pulse.probability)
             {
@@ -8452,6 +8595,7 @@ private:
         { return event.expiresMs <= now; }), flowDebugEvents.end());
         logicSignalTraces.erase (std::remove_if (logicSignalTraces.begin(), logicSignalTraces.end(), [now] (const auto& trace)
         { return trace.expiresMs <= now; }), logicSignalTraces.end());
+        lastFlowUpdateMs = juce::Time::getMillisecondCounterHiRes() - updateStarted;
         repaint();
     }
 
@@ -9117,6 +9261,7 @@ private:
             {
                 undoStates.push_back (lastCommittedState);
                 if (undoStates.size() > 100) undoStates.erase (undoStates.begin());
+                redoStates.clear();
             }
             lastCommittedState = current;
         }
@@ -11464,6 +11609,97 @@ private:
     int activeStrip = -1; Control activeControl = Control::none;
 };
 
+class AudioDiagnosticsPanel final : public juce::Component
+{
+public:
+    void setDiagnostics (juce::String deviceName, double sampleRate, int blockSize,
+                         int inputs, int outputs, juce::String engineStatus,
+                         float leftPeak, float rightPeak)
+    {
+        device = std::move (deviceName);
+        rate = sampleRate; block = blockSize; inputChannels = inputs; outputChannels = outputs;
+        engines = std::move (engineStatus); left = leftPeak; right = rightPeak;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = getLocalBounds().toFloat();
+        g.setColour (surfaceColour().withAlpha (0.96f)); g.fillRoundedRectangle (area, 9.0f);
+        g.setColour (subtleStroke().withAlpha (0.82f)); g.drawRoundedRectangle (area.reduced (0.5f), 9.0f, 1.0f);
+        g.setColour (accentColour()); g.fillRoundedRectangle ({ 0.0f, 12.0f, 3.0f, area.getHeight() - 24.0f }, 1.5f);
+        g.setColour (textPrimary()); g.setFont (juce::FontOptions (12.0f).withStyle ("Bold"));
+        g.drawText ("AUDIO", 18, 10, getWidth() - 32, 18, juce::Justification::centredLeft);
+        g.setColour (textMuted()); g.setFont (juce::FontOptions (10.5f));
+        g.drawText (device.isNotEmpty() ? device : "No audio device", 18, 31, getWidth() - 32, 17, juce::Justification::centredLeft);
+        g.drawText (juce::String (rate, 0) + " Hz   " + juce::String (block) + " samples   "
+                    + juce::String (inputChannels) + " in / " + juce::String (outputChannels) + " out",
+                    18, 49, getWidth() - 32, 17, juce::Justification::centredLeft);
+        g.drawText (engines, 18, 67, getWidth() - 32, 17, juce::Justification::centredLeft, true);
+        const auto meter = juce::Rectangle<float> (18.0f, 91.0f, area.getWidth() - 36.0f, 9.0f);
+        g.setColour (juce::Colour (0xff24342d)); g.fillRoundedRectangle (meter, 4.5f);
+        g.setColour (juce::Colour (0xff39e6a0));
+        g.fillRoundedRectangle (meter.withWidth (meter.getWidth() * juce::jlimit (0.0f, 1.0f, juce::jmax (left, right))), 4.5f);
+    }
+
+private:
+    juce::String device, engines;
+    double rate = 0.0;
+    int block = 0, inputChannels = 0, outputChannels = 0;
+    float left = 0.0f, right = 0.0f;
+};
+
+class PerformanceDiagnosticsPanel final : public juce::Component
+{
+public:
+    void setDiagnostics (RoadCanvas::PerformanceSnapshot value, double audioPercent)
+    { snapshot = value; audioLoad = audioPercent; repaint(); }
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = getLocalBounds().toFloat();
+        g.setColour (surfaceColour().withAlpha (0.96f)); g.fillRoundedRectangle (area, 9.0f);
+        g.setColour (subtleStroke().withAlpha (0.82f)); g.drawRoundedRectangle (area.reduced (0.5f), 9.0f, 1.0f);
+        g.setColour (juce::Colour (0xffff9f43)); g.fillRoundedRectangle ({ 0.0f, 12.0f, 3.0f, area.getHeight() - 24.0f }, 1.5f);
+        g.setColour (textPrimary()); g.setFont (juce::FontOptions (12.0f).withStyle ("Bold"));
+        g.drawText ("PERFORMANCE", 18, 10, getWidth() - 32, 18, juce::Justification::centredLeft);
+        g.setColour (textMuted()); g.setFont (juce::FontOptions (10.5f));
+        g.drawText (juce::String (snapshot.flowUpdateMs, 2) + " ms flow update   " + juce::String (audioLoad, 1) + "% audio",
+                    18, 34, getWidth() - 32, 17, juce::Justification::centredLeft);
+        g.drawText (juce::String (snapshot.drops) + " drops   " + juce::String (snapshot.devices) + " devices   "
+                    + juce::String (snapshot.pipes) + " pipes", 18, 55, getWidth() - 32, 17, juce::Justification::centredLeft);
+        g.drawText (juce::String ((int64) snapshot.contactChecks) + " contact candidates", 18, 76, getWidth() - 32, 17,
+                    juce::Justification::centredLeft);
+    }
+private:
+    RoadCanvas::PerformanceSnapshot snapshot;
+    double audioLoad = 0.0;
+};
+
+class AudioSettingsPanel final : public juce::Component
+{
+public:
+    AudioSettingsPanel (juce::AudioDeviceManager& manager, bool pdInputsMuted, std::function<void(bool)> changed)
+        : selector (manager, 0, 32, 1, 32, false, false, true, false), onMuteChanged (std::move (changed))
+    {
+        addAndMakeVisible (selector);
+        mutePdInputs.setButtonText ("Mute audio inputs to Pure Data");
+        mutePdInputs.setToggleState (pdInputsMuted, juce::dontSendNotification);
+        mutePdInputs.setColour (juce::ToggleButton::textColourId, textPrimary());
+        mutePdInputs.onClick = [this] { if (onMuteChanged) onMuteChanged (mutePdInputs.getToggleState()); };
+        addAndMakeVisible (mutePdInputs);
+    }
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (14);
+        mutePdInputs.setBounds (area.removeFromBottom (34));
+        area.removeFromBottom (8); selector.setBounds (area);
+    }
+private:
+    juce::AudioDeviceSelectorComponent selector;
+    juce::ToggleButton mutePdInputs;
+    std::function<void(bool)> onMuteChanged;
+};
+
 class MainComponent final : public juce::AudioAppComponent,
                             private juce::MidiInputCallback,
                             private juce::Timer,
@@ -11541,6 +11777,8 @@ public:
         addAndMakeVisible (clockButton);
         addAndMakeVisible (statusLabel);
         addAndMakeVisible (masterMeter);
+        addChildComponent (audioDiagnosticsPanel);
+        addChildComponent (performanceDiagnosticsPanel);
         addAndMakeVisible (layersTitleLabel);
         addAndMakeVisible (layersPathLabel);
         addAndMakeVisible (layersMainButton);
@@ -12157,8 +12395,22 @@ public:
 
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
     {
-        recordingSampleRate.store (sampleRate);
-        scAudio.prepare (sampleRate, samplesPerBlockExpected, 2, 2);
+        const auto safeRate = juce::jlimit (8000.0, 384000.0, sampleRate > 0.0 ? sampleRate : 44100.0);
+        const auto safeBlockSize = juce::jlimit (16, 32768, samplesPerBlockExpected > 0 ? samplesPerBlockExpected : 512);
+        auto outputChannels = 2;
+        auto inputChannels = 0;
+        if (const auto* device = deviceManager.getCurrentAudioDevice())
+        {
+            outputChannels = juce::jmax (1, device->getActiveOutputChannels().countNumberOfSetBits());
+            inputChannels = device->getActiveInputChannels().countNumberOfSetBits();
+        }
+        recordingSampleRate.store (safeRate);
+        currentAudioBlockSize.store (safeBlockSize);
+        currentAudioOutputChannels.store (outputChannels);
+        currentAudioInputChannels.store (inputChannels);
+        scratchAudio.setSize (juce::jmax (2, outputChannels), safeBlockSize, false, false, false);
+        scratchInput.setSize (std::max ({ 2, outputChannels, inputChannels }), safeBlockSize, false, false, false);
+        scAudio.prepare (safeRate, safeBlockSize, outputChannels, inputChannels);
         juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer<MainComponent> (this)]
         {
             if (safeThis != nullptr)
@@ -12170,14 +12422,23 @@ public:
     {
         if (bufferToFill.buffer == nullptr)
             return;
+        const auto callbackStarted = juce::Time::getMillisecondCounterHiRes();
+        const auto finishMeasurement = [this, callbackStarted, samples = bufferToFill.numSamples]
+        {
+            const auto rate = recordingSampleRate.load();
+            if (rate > 0.0 && samples > 0)
+                audioCallbackLoadPercent.store ((juce::Time::getMillisecondCounterHiRes() - callbackStarted)
+                                                 / (1000.0 * samples / rate) * 100.0);
+        };
 
         if (bufferToFill.startSample == 0 && bufferToFill.numSamples == bufferToFill.buffer->getNumSamples())
         {
             scratchInput.makeCopyOf (*bufferToFill.buffer, true);
-            scAudio.render (*bufferToFill.buffer, &scratchInput);
+            scAudio.render (*bufferToFill.buffer, pdAudioInputsMuted ? nullptr : &scratchInput);
             bufferToFill.buffer->applyGain (masterGain.load());
             captureMasterLevels (*bufferToFill.buffer, 0, bufferToFill.numSamples);
             writeMasterRecording (*bufferToFill.buffer, 0, bufferToFill.numSamples);
+            finishMeasurement();
             return;
         }
 
@@ -12185,7 +12446,7 @@ public:
         scratchInput.setSize (bufferToFill.buffer->getNumChannels(), bufferToFill.numSamples, false, false, true);
         for (int channel = 0; channel < bufferToFill.buffer->getNumChannels(); ++channel)
             scratchInput.copyFrom (channel, 0, *bufferToFill.buffer, channel, bufferToFill.startSample, bufferToFill.numSamples);
-        scAudio.render (scratchAudio, &scratchInput);
+        scAudio.render (scratchAudio, pdAudioInputsMuted ? nullptr : &scratchInput);
 
         for (int channel = 0; channel < bufferToFill.buffer->getNumChannels(); ++channel)
         {
@@ -12198,12 +12459,17 @@ public:
             bufferToFill.buffer->applyGain (channel, bufferToFill.startSample, bufferToFill.numSamples, masterGain.load());
         captureMasterLevels (*bufferToFill.buffer, bufferToFill.startSample, bufferToFill.numSamples);
         writeMasterRecording (*bufferToFill.buffer, bufferToFill.startSample, bufferToFill.numSamples);
+        finishMeasurement();
     }
 
     void releaseResources() override
     {
         stopMasterRecording();
         scAudio.release();
+        recordingSampleRate.store (0.0);
+        currentAudioBlockSize.store (0);
+        currentAudioOutputChannels.store (0);
+        currentAudioInputChannels.store (0);
         scratchAudio.setSize (0, 0);
         scratchInput.setSize (0, 0);
     }
@@ -12425,6 +12691,10 @@ public:
         const auto layersPanelHeight = hasLayerActions ? 138 : 100;
         layersPanelBounds = { bounds.getRight() - 14 - 248, bounds.getY() + 14, 248, layersPanelHeight };
         layersPanelBackground.setBounds (layersPanelBounds);
+        auto diagnosticsY = layersPanelBounds.getBottom() + 10;
+        audioDiagnosticsPanel.setBounds (getWidth() - 334, diagnosticsY, 314, 112);
+        if (audioDiagnosticsVisible) diagnosticsY += 122;
+        performanceDiagnosticsPanel.setBounds (getWidth() - 334, diagnosticsY, 314, 106);
         auto layerPanelInner = layersPanelBounds.reduced (12, 10);
         layersTitleLabel.setBounds (layerPanelInner.removeFromTop (16));
         layersPathLabel.setBounds (layerPanelInner.removeFromTop (17));
@@ -12465,7 +12735,7 @@ public:
         if (command && key.getKeyCode() == 'O') { openProject(); return true; }
         if (command && key.getKeyCode() == 'S') { key.getModifiers().isShiftDown() ? saveProjectAs() : saveProject(); return true; }
         if (command && key.getKeyCode() == 'W') { closeApplicationWindow(); return true; }
-        if (command && key.getKeyCode() == 'Z') { canvas.undo(); updateStatus(); return true; }
+        if (command && key.getKeyCode() == 'Z') { key.getModifiers().isShiftDown() ? canvas.redo() : canvas.undo(); updateStatus(); return true; }
         if (key.getKeyCode() == 'B' && ! command) { if (canvas.toggleSelectedDeviceBypass()) updateStatus(); return true; }
         if (key == juce::KeyPress::spaceKey) { setTransportRunning (! transportRunning); return true; }
         if (key == juce::KeyPress::backspaceKey || key == juce::KeyPress::deleteKey)
@@ -12497,6 +12767,7 @@ public:
         else if (index == 1)
         {
             menu.addItem (menuUndo, "Undo\tCmd+Z");
+            menu.addItem (menuRedo, "Redo\tShift+Cmd+Z");
             menu.addSeparator();
             menu.addItem (menuCopy, "Copy\tCmd+C");
             menu.addItem (menuPaste, "Paste\tCmd+V");
@@ -12526,6 +12797,9 @@ public:
             menu.addItem (menuCompactDiscs, "Compact Objects", true, compactDiscs);
             menu.addSeparator();
             menu.addItem (menuFlowDebug, "Flow Debug Overlay", true, flowDebugVisible);
+            menu.addItem (menuAudioDiagnostics, "Audio Diagnostics", true, audioDiagnosticsVisible);
+            menu.addItem (menuPerformanceDiagnostics, "Performance Diagnostics", true, performanceDiagnosticsVisible);
+            menu.addItem (menuAudioSettings, "Audio Settings...");
         }
         return menu;
     }
@@ -12546,6 +12820,7 @@ public:
         }
         else if (itemId == menuClose) closeApplicationWindow();
         else if (itemId == menuUndo) { canvas.undo(); updateStatus(); }
+        else if (itemId == menuRedo) { canvas.redo(); updateStatus(); }
         else if (itemId == menuCopy) canvas.copySelectedItems();
         else if (itemId == menuPaste) canvas.pasteSelectedItems();
         else if (itemId == menuDuplicate) canvas.duplicateSelectedItems();
@@ -12585,6 +12860,20 @@ public:
             canvas.setFlowDebugVisible (flowDebugVisible);
             menuItemsChanged();
         }
+        else if (itemId == menuAudioDiagnostics)
+        {
+            audioDiagnosticsVisible = ! audioDiagnosticsVisible;
+            audioDiagnosticsPanel.setVisible (audioDiagnosticsVisible);
+            resized();
+            menuItemsChanged();
+        }
+        else if (itemId == menuPerformanceDiagnostics)
+        {
+            performanceDiagnosticsVisible = ! performanceDiagnosticsVisible;
+            performanceDiagnosticsPanel.setVisible (performanceDiagnosticsVisible);
+            resized(); menuItemsChanged();
+        }
+        else if (itemId == menuAudioSettings) openAudioSettings();
         else if (itemId == menuAbout)
         {
             juce::NativeMessageBox::showAsync (
@@ -12717,8 +13006,8 @@ private:
     }
 
     enum { menuNewProject = 10001, menuOpenProject, menuSaveProject, menuSaveProjectAs, menuRecordWav, menuClose,
-           menuUndo, menuCopy, menuPaste, menuDuplicate, menuSaveAssembly, menuToggleBypass, menuClear, menuRainbowUi, menuMixer, menuClocks,
-           menuDimOrbitElements, menuCompactDiscs, menuFlowDebug };
+           menuUndo, menuRedo, menuCopy, menuPaste, menuDuplicate, menuSaveAssembly, menuToggleBypass, menuClear, menuRainbowUi, menuMixer, menuClocks,
+           menuDimOrbitElements, menuCompactDiscs, menuFlowDebug, menuAudioDiagnostics, menuPerformanceDiagnostics, menuAudioSettings };
     static constexpr int menuAbout = 10100;
     static constexpr int menuAssemblyBase = 11000;
     juce::PopupMenu applicationMenu;
@@ -12758,6 +13047,8 @@ private:
     juce::TextButton clockButton;
     juce::Label statusLabel;
     StereoMeter masterMeter;
+    AudioDiagnosticsPanel audioDiagnosticsPanel;
+    PerformanceDiagnosticsPanel performanceDiagnosticsPanel;
     juce::Label layersTitleLabel;
     juce::Label layersPathLabel;
     juce::TextButton layersMainButton;
@@ -12823,11 +13114,14 @@ private:
     juce::TextButton fireDiscButton;
     juce::TextButton dataPaneCloseButton;
     bool dataPaneOpen = false;
+    bool audioDiagnosticsVisible = false, performanceDiagnosticsVisible = false;
+    bool pdAudioInputsMuted = true;
     ScDiscAudioEngine scAudio;
     juce::AudioBuffer<float> scratchAudio;
     juce::AudioBuffer<float> scratchInput;
     std::atomic<float> masterLevelLeft { 0.0f }, masterLevelRight { 0.0f };
     std::atomic<float> masterGain { 1.0f };
+    std::atomic<double> audioCallbackLoadPercent { 0.0 };
     juce::StringArray midiInputIdentifiers;
     std::vector<std::unique_ptr<juce::MidiOutput>> midiOutputs;
     std::unique_ptr<FloatingEditorWindow> scCodeWindow;
@@ -12835,6 +13129,7 @@ private:
     std::unique_ptr<FloatingEditorWindow> scSheetWindow;
     std::unique_ptr<FloatingEditorWindow> orcaGridWindow;
     std::unique_ptr<FloatingEditorWindow> carouselWindow;
+    std::unique_ptr<FloatingEditorWindow> audioSettingsWindow;
     std::unique_ptr<FloatingEditorWindow> pipeElementWindow;
     std::unique_ptr<FloatingEditorWindow> mixerWindow;
     juce::Component* pipeElementComponent = nullptr;
@@ -12865,6 +13160,9 @@ private:
     juce::AudioFormatWriter::ThreadedWriter* activeRecordingWriter = nullptr;
     std::atomic<bool> recordingActive { false };
     std::atomic<double> recordingSampleRate { 0.0 };
+    std::atomic<int> currentAudioBlockSize { 0 };
+    std::atomic<int> currentAudioOutputChannels { 0 };
+    std::atomic<int> currentAudioInputChannels { 0 };
     std::atomic<double> recordingStartMs { 0.0 };
     juce::File currentRecordingFile;
     juce::ScopedMessageBox projectPrompt;
@@ -13023,6 +13321,16 @@ private:
     {
         updateElapsedTimeLabel();
         masterMeter.setLevels (masterLevelLeft.load(), masterLevelRight.load());
+        if (audioDiagnosticsVisible)
+        {
+            juce::String deviceName;
+            if (const auto* device = deviceManager.getCurrentAudioDevice()) deviceName = device->getName();
+            audioDiagnosticsPanel.setDiagnostics (deviceName, recordingSampleRate.load(), currentAudioBlockSize.load(),
+                                                  currentAudioInputChannels.load(), currentAudioOutputChannels.load(),
+                                                  scAudio.getStatusText(), masterLevelLeft.load(), masterLevelRight.load());
+        }
+        if (performanceDiagnosticsVisible)
+            performanceDiagnosticsPanel.setDiagnostics (canvas.getPerformanceSnapshot(), audioCallbackLoadPercent.load());
         masterLevelLeft.store (masterLevelLeft.load() * 0.82f); masterLevelRight.store (masterLevelRight.load() * 0.82f);
         const auto now = juce::Time::getMillisecondCounterHiRes();
         const auto beat = currentTransportBeat();
@@ -13135,18 +13443,15 @@ private:
 
     static void configurePaneLabel (juce::Label& label, float height, bool bold)
     {
-        label.setColour (juce::Label::textColourId, bold ? textPrimary() : textMuted());
-        label.setJustificationType (juce::Justification::centredLeft);
-        label.setFont (juce::FontOptions (height, bold ? juce::Font::bold : juce::Font::plain));
+        if (bold && height >= 16.0f) BlendingsInspector::styleTitle (label);
+        else if (bold) BlendingsInspector::styleSection (label);
+        else BlendingsInspector::styleLabel (label);
     }
 
     static void configurePaneButton (juce::TextButton& button, const juce::String& text)
     {
         button.setButtonText (text);
-        button.setColour (juce::TextButton::buttonColourId, raisedSurface());
-        button.setColour (juce::TextButton::buttonOnColourId, accentColour());
-        button.setColour (juce::TextButton::textColourOffId, textPrimary());
-        button.setColour (juce::TextButton::textColourOnId, appBackground());
+        BlendingsInspector::styleButton (button);
     }
 
     static void paintPaneRow (juce::Graphics& g, juce::Rectangle<int> bounds, juce::Colour accent, bool active)
@@ -13896,6 +14201,24 @@ private:
         mixerWindow->setResizeLimits (520, 420, 1800, 900);
     }
 
+    void openAudioSettings()
+    {
+        if (audioSettingsWindow != nullptr)
+        {
+            audioSettingsWindow->toFront (true);
+            return;
+        }
+        auto* panel = new AudioSettingsPanel (deviceManager, pdAudioInputsMuted, [this] (bool muted)
+        {
+            pdAudioInputsMuted = muted;
+        });
+        audioSettingsWindow = std::make_unique<FloatingEditorWindow> ("Audio Settings", panel, this, 640, 560, [this]
+        {
+            audioSettingsWindow = nullptr;
+        });
+        audioSettingsWindow->toFront (true);
+    }
+
     void chooseMasterRecordingFile()
     {
         if (isMasterRecording())
@@ -14496,7 +14819,18 @@ private:
         project.setProperty ("masterGain", masterGain.load(), nullptr);
         project.setProperty ("rainbowUi", rainbowMode, nullptr);
         const auto xml = project.createXml();
-        if (xml == nullptr || ! file.replaceWithText (xml->toString())) return false;
+        if (xml == nullptr) return false;
+        const auto serialised = xml->toString();
+        const auto validationXml = juce::XmlDocument::parse (serialised);
+        const auto validationState = validationXml != nullptr ? juce::ValueTree::fromXml (*validationXml) : juce::ValueTree();
+        if (! validationState.isValid() || ! validationState.hasType ("otherwareProject")
+            || static_cast<int> (validationState.getProperty ("version", 0)) != 1)
+            return false;
+
+        juce::TemporaryFile temporary (file);
+        if (! temporary.getFile().replaceWithText (serialised)
+            || ! temporary.overwriteTargetFileWithTemporary())
+            return false;
         currentProjectFile = file; projectDirty = false; updateProjectPresentation();
         statusLabel.setText ("Saved " + file.getFileName(), juce::dontSendNotification);
         return true;
@@ -14579,15 +14913,28 @@ private:
                     const auto xml = juce::XmlDocument::parse (file);
                     const auto state = xml != nullptr ? juce::ValueTree::fromXml (*xml) : juce::ValueTree();
                     const juce::ScopedValueSetter<bool> suppress (safeThis->suppressProjectDirty, true);
-                    if (safeThis->canvas.applyProjectState (state))
+                    juce::StringArray recovery;
+                    const auto backup = file.getSiblingFile (file.getFileNameWithoutExtension() + "-recovery-backup.otherware");
+                    file.copyFileTo (backup);
+                    if (safeThis->canvas.applyProjectState (state, &recovery))
                     {
                         safeThis->resetTransport();
                         safeThis->applyGlobalTiming (state);
                         safeThis->closeElementWindows();
                         safeThis->currentProjectFile = file; safeThis->projectDirty = false; safeThis->dataPaneOpen = false; safeThis->selectedElement = {};
                         safeThis->refreshDataPane(); safeThis->resized(); safeThis->updateStatus(); safeThis->updateProjectPresentation();
+                        if (recovery.isEmpty())
+                            backup.deleteFile();
+                        else
+                            juce::NativeMessageBox::showAsync (
+                                juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                                    .withTitle ("Project Recovered")
+                                    .withMessage ("Blendings opened the healthy parts of this project.\n\n"
+                                                  + recovery.joinIntoString ("\n")
+                                                  + "\n\nThe original was preserved as:\n" + backup.getFileName())
+                                    .withButton ("OK"), nullptr);
                     }
-                    else safeThis->showProjectError ("This is not a valid OTHERWARE project.");
+                    else { backup.deleteFile(); safeThis->showProjectError ("This is not a valid Blendings project."); }
                 }
                 safeThis->projectFileChooser = nullptr;
             });

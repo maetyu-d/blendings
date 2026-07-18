@@ -87,6 +87,29 @@ int main()
         std::cerr << "Carousel did not persist full sound editor changes\n";
         return 1;
     }
+    if (! editor.undo())
+    {
+        std::cerr << "Carousel undo was unavailable after a sound edit\n";
+        return 1;
+    }
+    const auto undone = editor.getDocument();
+    if (! undone.items[1].scCode.contains ("full editor")
+        || undone.items[2].pdPatch.contains ("full editor"))
+    {
+        std::cerr << "Carousel undo did not restore the previous attachment document state\n";
+        return 1;
+    }
+    if (! editor.redo() || ! editor.getDocument().items[2].pdPatch.contains ("full editor"))
+    {
+        std::cerr << "Carousel redo did not restore the sound edit\n";
+        return 1;
+    }
+    juce::String performanceFailure;
+    if (! editor.runPerformanceSmokeChecks (performanceFailure))
+    {
+        std::cerr << performanceFailure << '\n';
+        return 1;
+    }
     std::cout << "carouselDocument=" << restored.items.size() << " objects\n";
     return 0;
 }

@@ -1,8 +1,11 @@
 #include "CarouselEditorComponent.h"
+#include "InspectorStyle.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 
 namespace
 {
@@ -16,6 +19,46 @@ juce::Colour orbit() { return juce::Colour (0xff45d7c0); }
 juce::Colour post() { return juce::Colour (0xffff6b8a); }
 juce::Colour selectionBlue() { return juce::Colour (0xff1687f8); }
 constexpr int carouselGridSubdivisions = 4;
+
+using SpatialBucket = std::int64_t;
+
+SpatialBucket carouselBucketKey (int x, int y)
+{
+    return (static_cast<SpatialBucket> (x) << 32)
+         ^ static_cast<std::uint32_t> (y);
+}
+
+struct CarouselSpatialIndex
+{
+    static constexpr float cellSize = 0.5f;
+
+    void rebuild (const std::vector<CarouselDocument::Item>& items)
+    {
+        buckets.clear();
+        buckets.reserve (items.size() * 2);
+        for (int index = 0; index < static_cast<int> (items.size()); ++index)
+        {
+            const auto& item = items[static_cast<size_t> (index)];
+            buckets[carouselBucketKey (cell (item.x), cell (item.y))].push_back (index);
+        }
+    }
+
+    template <typename Callback>
+    void forEachNearby (float x, float y, float radius, Callback&& callback) const
+    {
+        const auto minX = cell (x - radius), maxX = cell (x + radius);
+        const auto minY = cell (y - radius), maxY = cell (y + radius);
+        for (int bucketY = minY; bucketY <= maxY; ++bucketY)
+            for (int bucketX = minX; bucketX <= maxX; ++bucketX)
+                if (const auto found = buckets.find (carouselBucketKey (bucketX, bucketY)); found != buckets.end())
+                    for (const auto index : found->second)
+                        callback (index);
+    }
+
+private:
+    static int cell (float value) { return static_cast<int> (std::floor (value / cellSize)); }
+    std::unordered_map<SpatialBucket, std::vector<int>> buckets;
+};
 
 float snapCarouselCoordinate (float value)
 {
@@ -152,44 +195,59 @@ CarouselEditorComponent::CarouselEditorComponent()
     orbitButton.onClick = [this] { setTool (Tool::orbit); }; postButton.onClick = [this] { setTool (Tool::post); };
     plankButton.onClick = [this] { setTool (Tool::plank); };
     for (auto* b : { &playButton, &clearButton, &deleteButton, &fitButton, &resetCodeButton, &soundButton, &auditionButton }) addAndMakeVisible (*b);
-    playButton.onClick = [this] { setRunning (! running); }; clearButton.onClick = [this] { document.items.clear(); selected = -1; changed(); };
+    playButton.onClick = [this] { setRunning (! running); }; clearButton.onClick = [this] { pushUndoState(); document.items.clear(); selected = -1; changed(); refreshInspector(); };
     deleteButton.onClick = [this] { deleteSelected(); };
     fitButton.onClick = [this] { zoom = 1.0f; pan = {}; repaint(); };
-    titleLabel.setText ("Carousel", juce::dontSendNotification); titleLabel.setFont (juce::FontOptions (18.0f).withStyle ("Bold")); titleLabel.setColour (juce::Label::textColourId, text()); addAndMakeVisible (titleLabel);
-    detailLabel.setColour (juce::Label::textColourId, muted()); detailLabel.setFont (juce::FontOptions (12.0f)); addAndMakeVisible (detailLabel);
-    for (auto [label, caption] : std::initializer_list<std::pair<juce::Label*, const char*>> { {&globalLabel,"FIELD"},{&selectionLabel,"INSPECTOR"} }) { label->setText(caption,juce::dontSendNotification);label->setColour(juce::Label::textColourId,text().withAlpha(.82f));label->setFont(juce::FontOptions(10.0f).withStyle("Bold"));addAndMakeVisible(*label); }
-    for (auto [label, caption] : std::initializer_list<std::pair<juce::Label*, const char*>> { {&bpmLabel,"BPM"},{&columnsLabel,"Columns"},{&rowsLabel,"Rows"},{&pitchLabel,"Pitch"},{&playbackLabel,"Playback"},{&durationLabel,"One-shot duration"},{&codeLabel,"Source"},{&speedLabel,"Tempo multiple"},{&radiusLabel,"Radius"},{&countLabel,"Orbit tones"} }) { label->setText(caption,juce::dontSendNotification);label->setColour(juce::Label::textColourId,muted());label->setFont(juce::FontOptions(11.0f));addAndMakeVisible(*label); }
-    auto setup = [this] (juce::Slider& s, double lo, double hi, double step) { s.setRange (lo, hi, step); s.setSliderStyle (juce::Slider::LinearHorizontal); s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 54, 22); s.setColour (juce::Slider::trackColourId, orbit()); s.setColour (juce::Slider::thumbColourId, accent()); s.setColour (juce::Slider::textBoxTextColourId, text()); s.setColour (juce::Slider::textBoxBackgroundColourId, surface()); addAndMakeVisible (s); };
+    titleLabel.setText ("Carousel", juce::dontSendNotification); BlendingsInspector::styleTitle (titleLabel); addAndMakeVisible (titleLabel);
+    BlendingsInspector::styleLabel (detailLabel); addAndMakeVisible (detailLabel);
+    for (auto [label, caption] : std::initializer_list<std::pair<juce::Label*, const char*>> { {&globalLabel,"FIELD"},{&selectionLabel,"INSPECTOR"} }) { label->setText(caption,juce::dontSendNotification);BlendingsInspector::styleSection(*label);addAndMakeVisible(*label); }
+    for (auto [label, caption] : std::initializer_list<std::pair<juce::Label*, const char*>> { {&bpmLabel,"BPM"},{&columnsLabel,"Columns"},{&rowsLabel,"Rows"},{&pitchLabel,"Pitch"},{&playbackLabel,"Playback"},{&durationLabel,"One-shot duration"},{&codeLabel,"Source"},{&speedLabel,"Tempo multiple"},{&radiusLabel,"Radius"},{&countLabel,"Orbit tones"},{&attachmentLabel,"Attached to"} }) { label->setText(caption,juce::dontSendNotification);BlendingsInspector::styleLabel(*label);addAndMakeVisible(*label); }
+    attachmentSummaryLabel.setColour (juce::Label::textColourId, muted());
+    attachmentSummaryLabel.setFont (juce::FontOptions (10.5f));
+    addAndMakeVisible (attachmentSummaryLabel);
+    auto setup = [this] (juce::Slider& s, double lo, double hi, double step) { s.setRange (lo, hi, step); BlendingsInspector::styleSlider (s, orbit()); addAndMakeVisible (s); };
     setup (bpmSlider, 40, 220, 1); setup (pitchSlider, 36, 96, 1); setup (durationSlider, 0.05, 30.0, 0.05); setup (speedSlider, -2, 2, .25); setup (radiusSlider, .5, 3, .05); setup (countSlider, 0, 16, 1);
     durationSlider.setTextValueSuffix (" s");
     for (int value = 4; value <= 24; ++value) columnsBox.addItem (juce::String (value), value);
     for (int value = 4; value <= 16; ++value) rowsBox.addItem (juce::String (value), value);
     playbackBox.addItem ("Tuned synth", 1); playbackBox.addItem ("SuperCollider", 2); playbackBox.addItem ("Pure Data", 3);
-    for (auto* box : { &columnsBox, &rowsBox, &playbackBox }) { box->setColour (juce::ComboBox::backgroundColourId, surface()); box->setColour (juce::ComboBox::textColourId, text()); box->setColour (juce::ComboBox::outlineColourId, grid()); addAndMakeVisible (*box); }
+    for (auto* box : { &columnsBox, &rowsBox, &playbackBox, &attachmentBox }) { BlendingsInspector::styleComboBox (*box); addAndMakeVisible (*box); }
+    for (auto* button : { &playButton, &clearButton, &deleteButton, &fitButton, &resetCodeButton, &soundButton, &auditionButton }) BlendingsInspector::styleButton (*button);
     codeEditor.setMultiLine (true); codeEditor.setReturnKeyStartsNewLine (true); codeEditor.setScrollbarsShown (true);
     codeEditor.setFont (juce::FontOptions (12.0f));
     codeEditor.setColour (juce::TextEditor::backgroundColourId, bg()); codeEditor.setColour (juce::TextEditor::textColourId, text());
     codeEditor.setColour (juce::TextEditor::outlineColourId, grid()); codeEditor.setColour (juce::TextEditor::focusedOutlineColourId, accent());
     addAndMakeVisible (codeEditor);
-    bpmSlider.onValueChange = [this] { if (! suppress) { document.bpm = bpmSlider.getValue(); changed(); } };
-    columnsBox.onChange = [this] { if (! suppress && columnsBox.getSelectedId() > 0) { document.columns = columnsBox.getSelectedId(); changed(); } };
-    rowsBox.onChange = [this] { if (! suppress && rowsBox.getSelectedId() > 0) { document.rows = rowsBox.getSelectedId(); changed(); } };
-    pitchSlider.onValueChange = [this] { if (! suppress) if (auto* i = selectedItem()) { i->midi = (int) pitchSlider.getValue(); changed(); } };
+    const auto makeSliderTransactional = [this] (juce::Slider& slider)
+    {
+        slider.onDragStart = [this] { if (! suppress && ! sliderHistoryStarted) { pushUndoState(); sliderHistoryStarted = true; } };
+        slider.onDragEnd = [this] { sliderHistoryStarted = false; };
+    };
+    for (auto* slider : { &bpmSlider, &pitchSlider, &durationSlider, &speedSlider, &radiusSlider, &countSlider })
+        makeSliderTransactional (*slider);
+    bpmSlider.onValueChange = [this] { if (! suppress) { if (! sliderHistoryStarted) pushUndoState(); document.bpm = bpmSlider.getValue(); changed(); } };
+    columnsBox.onChange = [this] { if (! suppress && columnsBox.getSelectedId() > 0) { pushUndoState(); document.columns = columnsBox.getSelectedId(); changed(); } };
+    rowsBox.onChange = [this] { if (! suppress && rowsBox.getSelectedId() > 0) { pushUndoState(); document.rows = rowsBox.getSelectedId(); changed(); } };
+    pitchSlider.onValueChange = [this] { if (! suppress) if (auto* i = selectedItem()) { if (! sliderHistoryStarted) pushUndoState(); i = selectedItem(); i->midi = (int) pitchSlider.getValue(); changed(); } };
     playbackBox.onChange = [this]
     {
         if (suppress || playbackBox.getSelectedId() <= 0) return;
         if (auto* i = selectedItem())
         {
+            pushUndoState();
+            i = selectedItem();
             i->playback = static_cast<CarouselDocument::PlaybackType> (playbackBox.getSelectedId() - 1);
             ensureToneSources (*i); changed(); refreshInspector();
         }
     };
-    durationSlider.onValueChange = [this] { if (! suppress) if (auto* i = selectedItem()) { i->durationSeconds = static_cast<float> (durationSlider.getValue()); changed(); } };
+    durationSlider.onValueChange = [this] { if (! suppress) if (auto* i = selectedItem()) { if (! sliderHistoryStarted) pushUndoState(); i = selectedItem(); i->durationSeconds = static_cast<float> (durationSlider.getValue()); changed(); } };
     codeEditor.onTextChange = [this]
     {
         if (suppress) return;
         if (auto* i = selectedItem())
         {
+            pushUndoState();
+            i = selectedItem();
             if (i->playback == CarouselDocument::PlaybackType::superCollider) i->scCode = codeEditor.getText();
             else if (i->playback == CarouselDocument::PlaybackType::pureData) i->pdPatch = codeEditor.getText();
             changed();
@@ -198,16 +256,17 @@ CarouselEditorComponent::CarouselEditorComponent()
     resetCodeButton.onClick = [this] { resetSelectedToneCode(); };
     soundButton.onClick = [this] { openSelectedToneSoundEditor(); };
     auditionButton.onClick = [this] { if (const auto* item = selectedItem()) triggerTone (*item); };
-    speedSlider.onValueChange = [this] { if (! suppress) if (auto* i = selectedItem()) { i->speed = (float) speedSlider.getValue(); changed(); } };
-    radiusSlider.onValueChange = [this] { if (! suppress) if (auto* i = selectedItem()) { i->radius = (float) radiusSlider.getValue(); arrangeOrbit (i->id); positionPlanksForOrbit (i->id); changed(); } };
+    speedSlider.onValueChange = [this] { if (! suppress) if (auto* i = selectedItem()) { if (! sliderHistoryStarted) pushUndoState(); i = selectedItem(); i->speed = (float) speedSlider.getValue(); changed(); } };
+    radiusSlider.onValueChange = [this] { if (! suppress) if (auto* i = selectedItem()) { if (! sliderHistoryStarted) pushUndoState(); i = selectedItem(); i->radius = (float) radiusSlider.getValue(); arrangeOrbit (i->id); positionPlanksForOrbit (i->id); changed(); } };
     countSlider.onValueChange = [this] { if (! suppress) setOrbitToneCount ((int) countSlider.getValue()); };
     euclideanButton.setColour (juce::ToggleButton::textColourId, text()); addAndMakeVisible (euclideanButton);
-    euclideanButton.onClick = [this] { if (! suppress) if (auto* i = selectedItem()) { i->euclidean = euclideanButton.getToggleState(); arrangeOrbit (i->id); changed(); } };
+    euclideanButton.onClick = [this] { if (! suppress) if (auto* i = selectedItem()) { pushUndoState(); i = selectedItem(); i->euclidean = euclideanButton.getToggleState(); arrangeOrbit (i->id); changed(); } };
+    attachmentBox.onChange = [this] { if (! suppress) changeSelectedAttachment(); };
     setDocument (CarouselDocument::createDefault()); startTimerHz (60);
 }
 
 CarouselEditorComponent::~CarouselEditorComponent() { stopTimer(); }
-void CarouselEditorComponent::setDocument (const CarouselDocument& d) { suppress = true; document = d; for (auto& item : document.items) ensureToneSources (item); selected = -1; bpmSlider.setValue (d.bpm); columnsBox.setSelectedId (d.columns, juce::dontSendNotification); rowsBox.setSelectedId (d.rows, juce::dontSendNotification); suppress = false; refreshInspector(); repaint(); }
+void CarouselEditorComponent::setDocument (const CarouselDocument& d) { suppress = true; document = d; for (auto& item : document.items) ensureToneSources (item); selected = -1; undoHistory.clear(); redoHistory.clear(); bpmSlider.setValue (d.bpm); columnsBox.setSelectedId (d.columns, juce::dontSendNotification); rowsBox.setSelectedId (d.rows, juce::dontSendNotification); suppress = false; refreshInspector(); repaint(); }
 void CarouselEditorComponent::setRunning (bool value) { running = value; contacts.clear(); lastTime = juce::Time::getMillisecondCounterHiRes(); playButton.setButtonText (running ? "stop" : "play"); repaint(); }
 void CarouselEditorComponent::setTool (Tool value) { tool = value; repaint(); }
 CarouselDocument::Item* CarouselEditorComponent::selectedItem() { for (auto& i : document.items) if (i.id == selected) return &i; return nullptr; }
@@ -266,6 +325,21 @@ void CarouselEditorComponent::paint (juce::Graphics& g)
     for (const auto& i : document.items)
     {
         const auto p = screenPoint ({ i.x, i.y }); const bool sel = i.id == selected;
+        const auto attachmentTarget = i.id == hoveredAttachmentTarget || i.id == dragAttachmentTarget;
+        if (attachmentTarget)
+        {
+            g.setColour (selectionBlue().withAlpha (0.18f));
+            g.fillEllipse (juce::Rectangle<float> (46.0f, 46.0f).withCentre (p));
+            g.setColour (selectionBlue().withAlpha (0.92f));
+            g.drawEllipse (juce::Rectangle<float> (40.0f, 40.0f).withCentre (p), 2.0f);
+        }
+        if (sel && i.ownerOrbit >= 0)
+            if (const auto parent = std::find_if (document.items.begin(), document.items.end(), [&i] (const auto& candidate) { return candidate.id == i.ownerOrbit; }); parent != document.items.end())
+            {
+                g.setColour (selectionBlue().withAlpha (0.55f));
+                const float dashes[] { 4.0f, 3.0f };
+                g.drawDashedLine ({ p, screenPoint ({ parent->x, parent->y }) }, dashes, 2, 1.4f);
+            }
         if (i.type == CarouselDocument::ItemType::orbit) { g.setColour ((sel ? accent() : orbit()).withAlpha (.86f)); g.drawEllipse (p.x-i.radius*cellSize(),p.y-i.radius*cellSize(),i.radius*cellSize()*2,i.radius*cellSize()*2,sel?2.2f:1.2f); g.fillEllipse (p.x-4,p.y-4,8,8); for(int k=0;k<3;k++){const auto a=i.phase+static_cast<float>(k)*juce::MathConstants<float>::twoPi/3.0f;g.drawLine(p.x,p.y,p.x+std::cos(a)*18,p.y+std::sin(a)*18,1.2f);} }
         else if (i.type == CarouselDocument::ItemType::post) { g.setColour (sel ? accent() : post()); g.fillEllipse (p.x-7,p.y-7,14,14); g.drawEllipse (p.x-13,p.y-13,26,26,1); }
         else
@@ -293,6 +367,22 @@ void CarouselEditorComponent::paint (juce::Graphics& g)
     g.restoreState();
 }
 
+void CarouselEditorComponent::mouseMove (const juce::MouseEvent& e)
+{
+    const auto previous = hoveredAttachmentTarget;
+    hoveredAttachmentTarget = -1;
+    if (fieldViewport().contains (e.position) && (tool == Tool::tone || tool == Tool::orbit || tool == Tool::plank))
+    {
+        CarouselDocument::Item preview;
+        preview.id = -1;
+        preview.type = tool == Tool::plank ? CarouselDocument::ItemType::plank
+                     : tool == Tool::orbit ? CarouselDocument::ItemType::orbit
+                                           : CarouselDocument::ItemType::tone;
+        hoveredAttachmentTarget = compatibleAttachmentTargetAt (gridPoint (e.position), preview.id);
+    }
+    if (previous != hoveredAttachmentTarget) repaint();
+}
+
 void CarouselEditorComponent::resized()
 {
     titleLabel.setBounds (18, 10, 126, 36);
@@ -304,8 +394,9 @@ void CarouselEditorComponent::resized()
     columnsLabel.setBounds(420,13,46,32);columnsBox.setBounds(468,13,72,32);
     rowsLabel.setBounds(558,13,32,32);rowsBox.setBounds(592,13,72,32);
     const int ix=getWidth()-266, iw=246;selectionLabel.setBounds(ix,78,iw,18);detailLabel.setBounds(ix,102,iw,28);
-    soundButton.setBounds(ix,142,(iw-8)/2,34);auditionButton.setBounds(ix+(iw-8)/2+8,142,(iw-8)/2,34);
-    speedLabel.setBounds(ix,150,iw,16);speedSlider.setBounds(ix,166,iw,28);radiusLabel.setBounds(ix,206,iw,16);radiusSlider.setBounds(ix,222,iw,28);countLabel.setBounds(ix,262,iw,16);countSlider.setBounds(ix,278,iw,28);euclideanButton.setBounds(ix,318,iw,28);deleteButton.setBounds(ix,getHeight()-58,iw,30);
+    attachmentLabel.setBounds(ix,140,iw,16);attachmentBox.setBounds(ix,158,iw,30);attachmentSummaryLabel.setBounds(ix,190,iw,20);
+    soundButton.setBounds(ix,220,(iw-8)/2,34);auditionButton.setBounds(ix+(iw-8)/2+8,220,(iw-8)/2,34);
+    speedLabel.setBounds(ix,220,iw,16);speedSlider.setBounds(ix,238,iw,28);radiusLabel.setBounds(ix,278,iw,16);radiusSlider.setBounds(ix,296,iw,28);countLabel.setBounds(ix,336,iw,16);countSlider.setBounds(ix,354,iw,28);euclideanButton.setBounds(ix,394,iw,28);deleteButton.setBounds(ix,getHeight()-58,iw,30);
 }
 
 void CarouselEditorComponent::mouseDown (const juce::MouseEvent& e)
@@ -313,9 +404,10 @@ void CarouselEditorComponent::mouseDown (const juce::MouseEvent& e)
     if(!fieldViewport().contains(e.position))return;grabKeyboardFocus(); if(e.mods.isRightButtonDown()||e.mods.isMiddleButtonDown()){panning=true;mouseStart=e.position;panStart=pan;return;}
     const auto q=gridPoint(e.position); CarouselDocument::Item* near=nullptr;float best=.45f;for(auto i=document.items.rbegin();i!=document.items.rend();++i){const auto d=std::hypot(i->x-q.x,i->y-q.y);if(d<best){best=d;near=&*i;}}
     const auto attachingToPlank = near != nullptr && near->type == CarouselDocument::ItemType::plank && (tool == Tool::tone || tool == Tool::orbit);
-    if(near && !attachingToPlank){selected=near->id;if(tool==Tool::select){dragged=near->id;dragOffset={near->x-q.x,near->y-q.y};if(e.getNumberOfClicks()>1&&near->type==CarouselDocument::ItemType::tone)triggerTone(*near);}else if(near->type==CarouselDocument::ItemType::tone)triggerTone(*near);refreshInspector();repaint();return;}
+    if(near && !attachingToPlank){selected=near->id;if(tool==Tool::select){dragged=near->id;dragOffset={near->x-q.x,near->y-q.y};pushUndoState();dragHistoryStarted=true;if(e.getNumberOfClicks()>1&&near->type==CarouselDocument::ItemType::tone)triggerTone(*near);}else if(near->type==CarouselDocument::ItemType::tone)triggerTone(*near);refreshInspector();repaint();return;}
     if(tool==Tool::select){selected=-1;refreshInspector();repaint();return;}
 
+    pushUndoState();
     CarouselDocument::Item n;
     n.id=document.nextId++;
     n.type=tool==Tool::tone?CarouselDocument::ItemType::tone:tool==Tool::orbit?CarouselDocument::ItemType::orbit:tool==Tool::post?CarouselDocument::ItemType::post:CarouselDocument::ItemType::plank;
@@ -342,13 +434,37 @@ void CarouselEditorComponent::mouseDown (const juce::MouseEvent& e)
     }
     ensureToneSources(n);selected=n.id;document.items.push_back(n);changed();refreshInspector();
 }
-void CarouselEditorComponent::mouseDrag (const juce::MouseEvent& e) { if(panning){pan=panStart+(e.position-mouseStart);repaint();return;}if(dragged<0)return;const auto q=gridPoint(e.position);for(auto&i:document.items)if(i.id==dragged){const auto nx=juce::jlimit(0.0f,(float)document.columns,q.x+dragOffset.x),ny=juce::jlimit(0.0f,(float)document.rows,q.y+dragOffset.y),dx=nx-i.x,dy=ny-i.y;i.x=nx;i.y=ny;translateDependents(i.id,dx,dy);changed();break;} }
-void CarouselEditorComponent::mouseUp (const juce::MouseEvent&) { if(panning){panning=false;return;}if(auto*i=selectedItem()){i->x=snapCarouselCoordinate(i->x);i->y=snapCarouselCoordinate(i->y);if(i->type==CarouselDocument::ItemType::orbit)arrangeOrbit(i->id);else if(i->type==CarouselDocument::ItemType::plank)updatePlankGeometry(*i);if(i->ownerOrbit>=0&&(i->type==CarouselDocument::ItemType::tone||i->type==CarouselDocument::ItemType::orbit))if(const auto mount=std::find_if(document.items.begin(),document.items.end(),[i](const auto& candidate){return candidate.id==i->ownerOrbit&&candidate.type==CarouselDocument::ItemType::plank;});mount!=document.items.end()){const auto dx=mount->x-i->x,dy=mount->y-i->y;i->x=mount->x;i->y=mount->y;translateDependents(i->id,dx,dy);}}dragged=-1;changed(); }
+void CarouselEditorComponent::mouseDrag (const juce::MouseEvent& e)
+{
+    if (panning) { pan = panStart + (e.position - mouseStart); repaint(); return; }
+    if (dragged < 0) return;
+    const auto q = gridPoint (e.position);
+    for (auto& i : document.items) if (i.id == dragged)
+    {
+        if (i.ownerOrbit >= 0 && e.getDistanceFromDragStart() > 9 && ! dragDetachedFromParent)
+        {
+            i.ownerOrbit = -1;
+            dragDetachedFromParent = true;
+            detailLabel.setText ("Detached - drop on a highlighted attachment point", juce::dontSendNotification);
+        }
+        const auto nx = juce::jlimit (0.0f, (float) document.columns, q.x + dragOffset.x);
+        const auto ny = juce::jlimit (0.0f, (float) document.rows, q.y + dragOffset.y);
+        const auto dx = nx - i.x, dy = ny - i.y;
+        i.x = nx; i.y = ny; translateDependents (i.id, dx, dy);
+        dragAttachmentTarget = compatibleAttachmentTargetAt (q, i.id);
+        if (dragAttachmentTarget >= 0)
+            detailLabel.setText ("Release to attach", juce::dontSendNotification);
+        else if (dragDetachedFromParent)
+            detailLabel.setText ("Move onto a highlighted point, or release freely", juce::dontSendNotification);
+        repaint(); break;
+    }
+}
+void CarouselEditorComponent::mouseUp (const juce::MouseEvent&) { if(panning){panning=false;return;}if(dragged>=0&&dragAttachmentTarget>=0)attachItemTo(dragged,dragAttachmentTarget);if(auto*i=selectedItem()){i->x=snapCarouselCoordinate(i->x);i->y=snapCarouselCoordinate(i->y);if(i->type==CarouselDocument::ItemType::orbit)arrangeOrbit(i->id);else if(i->type==CarouselDocument::ItemType::plank)updatePlankGeometry(*i);if(i->ownerOrbit>=0&&(i->type==CarouselDocument::ItemType::tone||i->type==CarouselDocument::ItemType::orbit))if(const auto mount=std::find_if(document.items.begin(),document.items.end(),[i](const auto& candidate){return candidate.id==i->ownerOrbit&&candidate.type==CarouselDocument::ItemType::plank;});mount!=document.items.end()){const auto dx=mount->x-i->x,dy=mount->y-i->y;i->x=mount->x;i->y=mount->y;translateDependents(i->id,dx,dy);}}dragged=-1;dragAttachmentTarget=-1;dragDetachedFromParent=false;if(dragHistoryStarted){dragHistoryStarted=false;changed();refreshInspector();}repaint(); }
 void CarouselEditorComponent::mouseWheelMove (const juce::MouseEvent& e,const juce::MouseWheelDetails&w){if(!fieldViewport().contains(e.position))return;const auto before=gridPoint(e.position);const auto old=zoom;zoom=juce::jlimit(.45f,3.0f,zoom*std::pow(1.15f,w.deltaY*4));if(!juce::approximatelyEqual(old,zoom))pan+=e.position-screenPoint(before);repaint();}
-bool CarouselEditorComponent::keyPressed (const juce::KeyPress& k){if(k==juce::KeyPress::backspaceKey||k==juce::KeyPress::deleteKey){deleteSelected();return true;}if(k==juce::KeyPress::spaceKey){setRunning(!running);return true;}return false;}
-void CarouselEditorComponent::deleteSelected(){const int id=selected;if(id<0)return;std::set<int> removed{id};for(bool added=true;added;){added=false;for(const auto&i:document.items)if(i.ownerOrbit>=0&&removed.count(i.ownerOrbit)&&!removed.count(i.id)){removed.insert(i.id);added=true;}}document.items.erase(std::remove_if(document.items.begin(),document.items.end(),[&removed](const auto&i){return removed.count(i.id)>0;}),document.items.end());selected=-1;changed();refreshInspector();}
+bool CarouselEditorComponent::keyPressed (const juce::KeyPress& k){const auto command=k.getModifiers().isCommandDown();if(command&&k.getKeyCode()=='Z')return k.getModifiers().isShiftDown()?redo():undo();if(command&&k.getKeyCode()=='Y')return redo();if(k==juce::KeyPress::backspaceKey||k==juce::KeyPress::deleteKey){deleteSelected();return true;}if(k==juce::KeyPress::spaceKey){setRunning(!running);return true;}return false;}
+void CarouselEditorComponent::deleteSelected(){const int id=selected;if(id<0)return;pushUndoState();std::set<int> removed{id};for(bool added=true;added;){added=false;for(const auto&i:document.items)if(i.ownerOrbit>=0&&removed.count(i.ownerOrbit)&&!removed.count(i.id)){removed.insert(i.id);added=true;}}document.items.erase(std::remove_if(document.items.begin(),document.items.end(),[&removed](const auto&i){return removed.count(i.id)>0;}),document.items.end());selected=-1;changed();refreshInspector();}
 int CarouselEditorComponent::orbitToneCount(int id)const{int n=0;for(const auto&i:document.items)if(i.type==CarouselDocument::ItemType::tone&&i.ownerOrbit==id)++n;return n;}
-void CarouselEditorComponent::setOrbitToneCount(int count){auto*o=selectedItem();if(!o||o->type!=CarouselDocument::ItemType::orbit)return;int n=orbitToneCount(o->id);while(n<count){CarouselDocument::Item i;i.id=document.nextId++;i.type=CarouselDocument::ItemType::tone;i.ownerOrbit=o->id;i.midi=48+(n%8)*3;i.voice=n%4;ensureToneSources(i);document.items.push_back(i);++n;}while(n>count){auto it=std::find_if(document.items.rbegin(),document.items.rend(),[o](const auto&i){return i.type==CarouselDocument::ItemType::tone&&i.ownerOrbit==o->id;});if(it==document.items.rend())break;document.items.erase(std::next(it).base());--n;}arrangeOrbit(o->id);changed();}
+void CarouselEditorComponent::setOrbitToneCount(int count){auto*o=selectedItem();if(!o||o->type!=CarouselDocument::ItemType::orbit||orbitToneCount(o->id)==count)return;pushUndoState();o=selectedItem();int n=orbitToneCount(o->id);while(n<count){CarouselDocument::Item i;i.id=document.nextId++;i.type=CarouselDocument::ItemType::tone;i.ownerOrbit=o->id;i.midi=48+(n%8)*3;i.voice=n%4;ensureToneSources(i);document.items.push_back(i);++n;}while(n>count){auto it=std::find_if(document.items.rbegin(),document.items.rend(),[o](const auto&i){return i.type==CarouselDocument::ItemType::tone&&i.ownerOrbit==o->id;});if(it==document.items.rend())break;document.items.erase(std::next(it).base());--n;}arrangeOrbit(o->id);changed();}
 void CarouselEditorComponent::arrangeOrbit(int id){auto o=std::find_if(document.items.begin(),document.items.end(),[id](const auto&i){return i.id==id&&i.type==CarouselDocument::ItemType::orbit;});if(o==document.items.end())return;std::vector<CarouselDocument::Item*> tones;for(auto&i:document.items)if(i.type==CarouselDocument::ItemType::tone&&i.ownerOrbit==id)tones.push_back(&i);for(size_t n=0;n<tones.size();++n){const auto pos=o->euclidean?(float)((int)n*16/(int)tones.size())/16.0f:(float)n/(float)tones.size(),a=pos*juce::MathConstants<float>::twoPi;tones[n]->x=o->x+std::cos(a)*o->radius;tones[n]->y=o->y+std::sin(a)*o->radius;}}
 void CarouselEditorComponent::updatePlankGeometry (CarouselDocument::Item& plank)
 {
@@ -390,6 +506,66 @@ void CarouselEditorComponent::translateDependents (int parentId, float dx, float
         }
     for (const auto childId : children) translateDependents (childId, dx, dy);
 }
+
+int CarouselEditorComponent::compatibleAttachmentTargetAt (juce::Point<float> gridPosition, int childId) const
+{
+    const CarouselDocument::Item* child = nullptr;
+    if (childId >= 0)
+        if (const auto found = std::find_if (document.items.begin(), document.items.end(), [childId] (const auto& item) { return item.id == childId; }); found != document.items.end())
+            child = &*found;
+
+    const auto childType = child != nullptr ? child->type
+                         : tool == Tool::plank ? CarouselDocument::ItemType::plank
+                         : tool == Tool::orbit ? CarouselDocument::ItemType::orbit
+                                               : CarouselDocument::ItemType::tone;
+    const auto targetType = childType == CarouselDocument::ItemType::plank
+                              ? CarouselDocument::ItemType::orbit
+                              : CarouselDocument::ItemType::plank;
+    if (childType == CarouselDocument::ItemType::post) return -1;
+
+    auto bestId = -1;
+    auto bestDistance = 0.62f;
+    for (const auto& candidate : document.items)
+    {
+        if (candidate.id == childId || candidate.type != targetType) continue;
+        if (targetType == CarouselDocument::ItemType::plank)
+        {
+            const auto occupied = std::any_of (document.items.begin(), document.items.end(), [&candidate, childId] (const auto& item)
+            {
+                return item.id != childId && item.ownerOrbit == candidate.id
+                    && (item.type == CarouselDocument::ItemType::tone || item.type == CarouselDocument::ItemType::orbit);
+            });
+            if (occupied) continue;
+        }
+        const auto distance = std::hypot (candidate.x - gridPosition.x, candidate.y - gridPosition.y);
+        if (distance < bestDistance) { bestDistance = distance; bestId = candidate.id; }
+    }
+    return bestId;
+}
+
+bool CarouselEditorComponent::attachItemTo (int childId, int parentId)
+{
+    auto child = std::find_if (document.items.begin(), document.items.end(), [childId] (const auto& item) { return item.id == childId; });
+    const auto parent = std::find_if (document.items.begin(), document.items.end(), [parentId] (const auto& item) { return item.id == parentId; });
+    if (child == document.items.end() || parent == document.items.end()) return false;
+    const auto compatible = (child->type == CarouselDocument::ItemType::plank && parent->type == CarouselDocument::ItemType::orbit)
+                         || ((child->type == CarouselDocument::ItemType::tone || child->type == CarouselDocument::ItemType::orbit)
+                             && parent->type == CarouselDocument::ItemType::plank);
+    if (! compatible) return false;
+
+    child->ownerOrbit = parentId;
+    if (child->type == CarouselDocument::ItemType::plank)
+        updatePlankGeometry (*child);
+    else
+    {
+        const auto dx = parent->x - child->x, dy = parent->y - child->y;
+        child->x = parent->x; child->y = parent->y;
+        translateDependents (child->id, dx, dy);
+    }
+    detailLabel.setText ("Attached to " + juce::String (parent->type == CarouselDocument::ItemType::plank ? "plank " : "carousel ")
+                         + juce::String (parentId), juce::dontSendNotification);
+    return true;
+}
 void CarouselEditorComponent::changed(){repaint();if(!suppress&&onChange)onChange(document);}
 
 void CarouselEditorComponent::triggerTone (const CarouselDocument::Item& item)
@@ -423,6 +599,7 @@ void CarouselEditorComponent::openSelectedToneSoundEditor()
         for (auto& tone : safeThis->document.items)
             if (tone.id == toneId)
             {
+                safeThis->pushUndoState();
                 tone.playback = static_cast<CarouselDocument::PlaybackType> ((int) sound.playback);
                 tone.midi = sound.midiNote;
                 tone.durationSeconds = sound.durationSeconds;
@@ -475,6 +652,7 @@ bool CarouselEditorComponent::openFullSoundEditor (int toneId)
         for (auto& tone : safeThis->document.items)
             if (tone.id == toneId && tone.type == CarouselDocument::ItemType::tone)
             {
+                safeThis->pushUndoState();
                 if (isSc) tone.scCode = newSource;
                 else      tone.pdPatch = newSource;
                 tone.durationSeconds = newDuration;
@@ -490,6 +668,8 @@ void CarouselEditorComponent::resetSelectedToneCode()
 {
     if (auto* item = selectedItem())
     {
+        pushUndoState();
+        item = selectedItem();
         if (item->playback == CarouselDocument::PlaybackType::superCollider)
             item->scCode = defaultCarouselScCode();
         else if (item->playback == CarouselDocument::PlaybackType::pureData)
@@ -524,6 +704,7 @@ void CarouselEditorComponent::refreshInspector()
     radiusLabel.setVisible (orbitItem); radiusSlider.setVisible (orbitItem);
     countLabel.setVisible (orbitItem); countSlider.setVisible (orbitItem);
     euclideanButton.setVisible (orbitItem); deleteButton.setVisible (item != nullptr);
+    refreshAttachmentInspector();
 
     if (item != nullptr)
     {
@@ -544,6 +725,111 @@ void CarouselEditorComponent::refreshInspector()
     suppress = false;
 }
 
+void CarouselEditorComponent::pushUndoState()
+{
+    if (suppress || restoringHistory) return;
+    undoHistory.push_back (document);
+    if (undoHistory.size() > 100) undoHistory.erase (undoHistory.begin());
+    redoHistory.clear();
+}
+
+bool CarouselEditorComponent::undo()
+{
+    if (undoHistory.empty()) return false;
+    redoHistory.push_back (document);
+    restoringHistory = true;
+    document = std::move (undoHistory.back());
+    undoHistory.pop_back();
+    restoringHistory = false;
+    selected = -1;
+    refreshInspector();
+    changed();
+    return true;
+}
+
+bool CarouselEditorComponent::redo()
+{
+    if (redoHistory.empty()) return false;
+    undoHistory.push_back (document);
+    restoringHistory = true;
+    document = std::move (redoHistory.back());
+    redoHistory.pop_back();
+    restoringHistory = false;
+    selected = -1;
+    refreshInspector();
+    changed();
+    return true;
+}
+
+void CarouselEditorComponent::refreshAttachmentInspector()
+{
+    attachmentBox.clear (juce::dontSendNotification);
+    const auto* item = selectedItem();
+    const auto canAttach = item != nullptr && item->type != CarouselDocument::ItemType::post;
+    attachmentLabel.setVisible (canAttach);
+    attachmentBox.setVisible (canAttach);
+    attachmentSummaryLabel.setVisible (item != nullptr);
+    if (item == nullptr)
+    {
+        attachmentSummaryLabel.setText ({}, juce::dontSendNotification);
+        return;
+    }
+
+    attachmentBox.addItem ("Unattached", 1);
+    const auto parentType = item->type == CarouselDocument::ItemType::plank
+                              ? CarouselDocument::ItemType::orbit
+                              : CarouselDocument::ItemType::plank;
+    auto selectedId = 1;
+    for (const auto& candidate : document.items)
+        if (candidate.id != item->id && candidate.type == parentType)
+        {
+            const auto name = parentType == CarouselDocument::ItemType::orbit ? "Carousel " : "Plank ";
+            attachmentBox.addItem (name + juce::String (candidate.id), candidate.id + 2);
+            if (candidate.id == item->ownerOrbit) selectedId = candidate.id + 2;
+        }
+    attachmentBox.setSelectedId (selectedId, juce::dontSendNotification);
+
+    const auto childCount = std::count_if (document.items.begin(), document.items.end(), [item] (const auto& candidate)
+    {
+        return candidate.ownerOrbit == item->id;
+    });
+    const auto parentText = item->ownerOrbit < 0 ? "Free" : "Parent " + juce::String (item->ownerOrbit);
+    attachmentSummaryLabel.setText (parentText + "  /  " + juce::String (childCount) + (childCount == 1 ? " attachment" : " attachments"),
+                                    juce::dontSendNotification);
+}
+
+void CarouselEditorComponent::changeSelectedAttachment()
+{
+    auto* item = selectedItem();
+    if (item == nullptr || item->type == CarouselDocument::ItemType::post) return;
+    const auto newParent = attachmentBox.getSelectedId() <= 1 ? -1 : attachmentBox.getSelectedId() - 2;
+    if (newParent == item->ownerOrbit) return;
+    pushUndoState();
+    item = selectedItem();
+    item->ownerOrbit = newParent;
+    if (newParent >= 0)
+    {
+        const auto parent = std::find_if (document.items.begin(), document.items.end(), [newParent] (const auto& candidate)
+        {
+            return candidate.id == newParent;
+        });
+        if (parent != document.items.end())
+        {
+            if (item->type == CarouselDocument::ItemType::plank)
+                updatePlankGeometry (*item);
+            else
+            {
+                const auto dx = parent->x - item->x, dy = parent->y - item->y;
+                item->x = parent->x;
+                item->y = parent->y;
+                translateDependents (item->id, dx, dy);
+            }
+        }
+    }
+    changed();
+    refreshInspector();
+}
+
 void CarouselEditorComponent::timerCallback()
 {
     const auto now = juce::Time::getMillisecondCounterHiRes();
@@ -554,7 +840,14 @@ void CarouselEditorComponent::timerCallback()
     if (! running) { lastTime = now; return; }
     const auto dt = static_cast<float> (juce::jmin (.035, (now - lastTime) / 1000.0));
     lastTime = now;
-    std::set<juce::String> current;
+    struct MovingSound
+    {
+        int carrierId = -1;
+        int soundId = -1;
+        int orbitId = -1;
+    };
+    std::vector<MovingSound> movingSounds;
+    movingSounds.reserve (document.items.size());
     for (auto& orbitItem : document.items)
         if (orbitItem.type == CarouselDocument::ItemType::orbit)
         {
@@ -572,7 +865,7 @@ void CarouselEditorComponent::timerCallback()
                     tone.x = orbitItem.x + std::cos (angle) * radius; tone.y = orbitItem.y + std::sin (angle) * radius;
                     if (tone.type == CarouselDocument::ItemType::plank) { tone.radius = juce::jmax (.25f, radius - orbitItem.radius); tone.phase = angle; }
                     translateDependents (tone.id, tone.x - oldX, tone.y - oldY);
-                    const CarouselDocument::Item* sound = &tone;
+                    auto soundId = tone.id;
                     if (tone.type == CarouselDocument::ItemType::plank)
                     {
                         const auto mountedTone = std::find_if (document.items.begin(), document.items.end(), [&tone] (const auto& item)
@@ -580,18 +873,150 @@ void CarouselEditorComponent::timerCallback()
                             return item.type == CarouselDocument::ItemType::tone && item.ownerOrbit == tone.id;
                         });
                         if (mountedTone == document.items.end()) continue;
-                        sound = &*mountedTone;
+                        soundId = mountedTone->id;
                     }
-                    for (const auto& obstacle : document.items)
-                        if (obstacle.id != tone.id && obstacle.id != sound->id && obstacle.id != orbitItem.id && obstacle.type != CarouselDocument::ItemType::orbit
-                            && std::hypot (obstacle.x - sound->x, obstacle.y - sound->y) < .43f)
-                        {
-                            const auto key = juce::String (juce::jmin (sound->id, obstacle.id)) + ":" + juce::String (juce::jmax (sound->id, obstacle.id));
-                            current.insert (key);
-                            if (! contacts.count (key)) triggerTone (*sound);
-                        }
+                    movingSounds.push_back ({ tone.id, soundId, orbitItem.id });
                 }
         }
+
+    std::sort (movingSounds.begin(), movingSounds.end(), [] (const auto& a, const auto& b)
+    {
+        return std::tie (a.soundId, a.carrierId, a.orbitId) < std::tie (b.soundId, b.carrierId, b.orbitId);
+    });
+    movingSounds.erase (std::unique (movingSounds.begin(), movingSounds.end(), [] (const auto& a, const auto& b)
+    {
+        return a.soundId == b.soundId && a.carrierId == b.carrierId && a.orbitId == b.orbitId;
+    }), movingSounds.end());
+
+    CarouselSpatialIndex spatialIndex;
+    spatialIndex.rebuild (document.items);
+    std::set<juce::String> current;
+    for (const auto& moving : movingSounds)
+    {
+        const auto sound = std::find_if (document.items.begin(), document.items.end(), [&moving] (const auto& item)
+        {
+            return item.id == moving.soundId;
+        });
+        if (sound == document.items.end()) continue;
+
+        spatialIndex.forEachNearby (sound->x, sound->y, .43f, [&] (int obstacleIndex)
+        {
+            const auto& obstacle = document.items[static_cast<size_t> (obstacleIndex)];
+            if (obstacle.id == moving.carrierId || obstacle.id == sound->id || obstacle.id == moving.orbitId
+                || obstacle.type == CarouselDocument::ItemType::orbit
+                || std::hypot (obstacle.x - sound->x, obstacle.y - sound->y) >= .43f)
+                return;
+
+            const auto key = juce::String (juce::jmin (sound->id, obstacle.id)) + ":"
+                           + juce::String (juce::jmax (sound->id, obstacle.id));
+            current.insert (key);
+            if (! contacts.count (key)) triggerTone (*sound);
+        });
+    }
     contacts = std::move (current);
     repaint();
+}
+
+bool CarouselEditorComponent::runPerformanceSmokeChecks (juce::String& failureMessage)
+{
+    CarouselDocument dense;
+    dense.columns = 32;
+    dense.rows = 24;
+    dense.bpm = 160.0;
+    dense.nextId = 1;
+
+    constexpr int orbitCount = 24;
+    constexpr int tonesPerOrbit = 16;
+    for (int orbitIndex = 0; orbitIndex < orbitCount; ++orbitIndex)
+    {
+        CarouselDocument::Item orbit;
+        orbit.id = dense.nextId++;
+        orbit.type = CarouselDocument::ItemType::orbit;
+        orbit.x = 3.0f + (float) (orbitIndex % 6) * 5.0f;
+        orbit.y = 3.0f + (float) (orbitIndex / 6) * 5.0f;
+        orbit.radius = 1.65f;
+        orbit.speed = (orbitIndex % 2 == 0 ? 0.7f : -0.55f);
+        dense.items.push_back (orbit);
+
+        for (int toneIndex = 0; toneIndex < tonesPerOrbit; ++toneIndex)
+        {
+            const auto angle = juce::MathConstants<float>::twoPi * (float) toneIndex / (float) tonesPerOrbit;
+            CarouselDocument::Item tone;
+            tone.id = dense.nextId++;
+            tone.type = CarouselDocument::ItemType::tone;
+            tone.ownerOrbit = orbit.id;
+            tone.phase = angle;
+            tone.x = orbit.x + std::cos (angle) * orbit.radius;
+            tone.y = orbit.y + std::sin (angle) * orbit.radius;
+            tone.midi = 48 + toneIndex % 36;
+            dense.items.push_back (tone);
+        }
+
+        for (int plankIndex = 0; plankIndex < 2; ++plankIndex)
+        {
+            const auto angle = juce::MathConstants<float>::pi * (float) plankIndex + (float) orbitIndex * 0.11f;
+            CarouselDocument::Item plank;
+            plank.id = dense.nextId++;
+            plank.type = CarouselDocument::ItemType::plank;
+            plank.ownerOrbit = orbit.id;
+            plank.phase = angle;
+            plank.radius = 2.5f;
+            plank.x = orbit.x + std::cos (angle) * plank.radius;
+            plank.y = orbit.y + std::sin (angle) * plank.radius;
+            dense.items.push_back (plank);
+        }
+    }
+
+    for (int postIndex = 0; postIndex < 96; ++postIndex)
+    {
+        CarouselDocument::Item post;
+        post.id = dense.nextId++;
+        post.type = CarouselDocument::ItemType::post;
+        post.x = 0.5f + (float) (postIndex % 16) * 2.0f;
+        post.y = 0.5f + (float) (postIndex / 16) * 3.5f;
+        dense.items.push_back (post);
+    }
+
+    setDocument (dense);
+    setSize (1440, 900);
+    resized();
+    running = true;
+    lastTime = juce::Time::getMillisecondCounterHiRes() - 1000.0 / 60.0;
+
+    const auto updateStarted = juce::Time::getMillisecondCounterHiRes();
+    for (int frame = 0; frame < 240; ++frame)
+        timerCallback();
+    const auto updateMs = juce::Time::getMillisecondCounterHiRes() - updateStarted;
+
+    juce::Image image (juce::Image::ARGB, getWidth(), getHeight(), true);
+    const auto paintStarted = juce::Time::getMillisecondCounterHiRes();
+    for (int frame = 0; frame < 30; ++frame)
+    {
+        juce::Graphics graphics (image);
+        paint (graphics);
+    }
+    const auto paintMs = juce::Time::getMillisecondCounterHiRes() - paintStarted;
+    running = false;
+
+    if (document.items.size() != (size_t) (orbitCount * (1 + tonesPerOrbit + 2) + 96))
+    {
+        failureMessage = "Dense Carousel scene lost objects during playback";
+        return false;
+    }
+
+    for (const auto& item : document.items)
+        if (! std::isfinite (item.x) || ! std::isfinite (item.y)
+            || ! std::isfinite (item.phase) || ! std::isfinite (item.radius))
+        {
+            failureMessage = "Dense Carousel scene produced invalid geometry";
+            return false;
+        }
+
+    if (updateMs > 5000.0 || paintMs > 5000.0)
+    {
+        failureMessage = "Dense Carousel scene exceeded its performance budget";
+        return false;
+    }
+
+    return true;
 }

@@ -4,6 +4,7 @@
 #include "EmbeddedScAudioEngine.h"
 #include "MusicalObjectEditorComponent.h"
 #include "PipeWorkspaceComponent.h"
+#include "InspectorStyle.h"
 
 #include <algorithm>
 #include <array>
@@ -1120,6 +1121,22 @@ public:
             return false;
         }
 
+        received.clear();
+        received.reserve (12000);
+        const auto dispatchStarted = juce::Time::getMillisecondCounterHiRes();
+        for (int pass = 0; pass < 4000; ++pass)
+            for (int i = 0; i < 3; ++i)
+            {
+                passingDrop.position = { i + 1, 1, 1 };
+                triggerValve (passingDrop.position, passingDrop);
+            }
+        const auto dispatchMs = juce::Time::getMillisecondCounterHiRes() - dispatchStarted;
+        if (received.size() != 12000 || dispatchMs > 5000.0)
+        {
+            failure = "Pipe World trigger dispatch exceeded its performance budget";
+            return false;
+        }
+
         return true;
     }
 
@@ -2041,6 +2058,7 @@ private:
     {
         button.setButtonText (text);
         button.setTooltip (tooltip);
+        BlendingsInspector::styleButton (button);
         button.addListener (this);
         addAndMakeVisible (button);
     }
@@ -2049,8 +2067,7 @@ private:
     {
         slider.setRange (min, max, step);
         slider.setValue (value, juce::dontSendNotification);
-        slider.setSliderStyle (juce::Slider::LinearHorizontal);
-        slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 46, 24);
+        BlendingsInspector::styleSlider (slider);
         slider.addListener (this);
         addAndMakeVisible (slider);
     }

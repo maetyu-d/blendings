@@ -57,37 +57,49 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseMove (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool keyPressed (const juce::KeyPress&) override;
     bool openFullSoundEditor (int toneId);
+    bool runPerformanceSmokeChecks (juce::String& failureMessage);
+    bool undo();
+    bool redo();
 
 private:
     enum class Tool { select, tone, orbit, post, plank };
     CarouselDocument document;
     Tool tool = Tool::select;
-    int selected = -1, dragged = -1;
+    int selected = -1, dragged = -1, hoveredAttachmentTarget = -1, dragAttachmentTarget = -1;
     bool running = false, panning = false, suppress = false;
+    bool restoringHistory = false, dragHistoryStarted = false, dragDetachedFromParent = false;
+    bool sliderHistoryStarted = false;
     double lastTime = 0.0;
     float zoom = 1.0f;
     juce::Point<float> pan, panStart, mouseStart, dragOffset;
     std::set<juce::String> contacts;
     std::map<int, double> activeToneUntilMs;
+    std::vector<CarouselDocument> undoHistory, redoHistory;
 
     juce::TextButton selectButton { "select" }, toneButton { "tone" }, orbitButton { "orbit" }, postButton { "post" }, plankButton { "plank" };
     juce::TextButton playButton { "play" }, clearButton { "clear all" }, deleteButton { "delete" }, fitButton { "fit" };
     juce::TextButton resetCodeButton { "Reset template" }, soundButton { "Sound..." }, auditionButton { "Audition" };
     juce::Slider bpmSlider, pitchSlider, durationSlider, speedSlider, radiusSlider, countSlider;
     juce::ComboBox columnsBox, rowsBox, playbackBox;
+    juce::ComboBox attachmentBox;
     juce::TextEditor codeEditor;
     juce::ToggleButton euclideanButton { "Euclidean spacing" };
     juce::Label titleLabel, detailLabel, globalLabel, selectionLabel, bpmLabel, columnsLabel, rowsLabel,
-                pitchLabel, playbackLabel, durationLabel, codeLabel, speedLabel, radiusLabel, countLabel;
+                pitchLabel, playbackLabel, durationLabel, codeLabel, speedLabel, radiusLabel, countLabel,
+                attachmentLabel, attachmentSummaryLabel;
 
     void timerCallback() override;
     void changed();
+    void pushUndoState();
+    void refreshAttachmentInspector();
+    void changeSelectedAttachment();
     void refreshInspector();
     CarouselDocument::Item* selectedItem();
     const CarouselDocument::Item* selectedItem() const;
@@ -97,6 +109,8 @@ private:
     void updatePlankGeometry (CarouselDocument::Item& plank);
     void positionPlanksForOrbit (int orbitId);
     void translateDependents (int parentId, float dx, float dy);
+    int compatibleAttachmentTargetAt (juce::Point<float> gridPosition, int childId) const;
+    bool attachItemTo (int childId, int parentId);
     int orbitToneCount (int orbitId) const;
     void setOrbitToneCount (int count);
     void triggerTone (const CarouselDocument::Item&);

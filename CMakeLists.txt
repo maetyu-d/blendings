@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.5.0 LANGUAGES C CXX)
+project(Blendings VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -225,6 +225,44 @@ if(OTHERWARE_HAS_LIBPD)
     target_link_libraries(SCAudioSmoke PRIVATE otherware_libpd)
 endif()
 
+add_executable(AudioRobustnessSmoke EXCLUDE_FROM_ALL
+    Source/AudioRobustnessSmoke.cpp
+    Source/EmbeddedScAudioEngine.cpp
+    Source/EmbeddedScAudioEngine.h
+    Source/GridInterpreter.cpp
+    Source/GridInterpreter.h
+    Source/GridModel.cpp
+    Source/GridModel.h
+    Source/InternalEvent.h
+    Source/PdAudioEngine.cpp
+    Source/PdAudioEngine.h
+    Source/ScDiscAudioEngine.cpp
+    Source/ScDiscAudioEngine.h
+    Source/ScSheetFormula.cpp
+    Source/ScSheetFormula.h
+    Source/ScSheetMath.cpp
+    Source/ScSheetMath.h
+    Source/ScSheetScore.cpp
+    Source/ScSheetScore.h)
+target_compile_definitions(AudioRobustnessSmoke PRIVATE
+    OTHERWARE_HAS_LIBPD=$<BOOL:${OTHERWARE_HAS_LIBPD}>
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
+    OTHERWARE_PD_EXTRA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/third_party/pure-data/extra"
+    GRIDCOLLIDER_ALCHEMY_SC_ROOT="${BLENDINGS_SC_ROOT}")
+if (EXISTS "${SUPERCOLLIDER_INCLUDE_ROOT}/server/SC_WorldOptions.h")
+    target_include_directories(AudioRobustnessSmoke SYSTEM PRIVATE
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/common"
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/plugin_interface"
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/server")
+    target_compile_definitions(AudioRobustnessSmoke PRIVATE GRIDCOLLIDER_HAS_SC_HEADERS=1)
+endif()
+target_link_libraries(AudioRobustnessSmoke PRIVATE
+    juce::juce_audio_basics juce::juce_core juce::juce_data_structures
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+if(OTHERWARE_HAS_LIBPD)
+    target_link_libraries(AudioRobustnessSmoke PRIVATE otherware_libpd)
+endif()
+
 add_executable(CarouselSmoke EXCLUDE_FROM_ALL
     Source/CarouselEditorComponent.cpp
     Source/CarouselEditorComponent.h
@@ -237,6 +275,12 @@ target_link_libraries(CarouselSmoke PRIVATE
     juce::juce_data_structures
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)
+
+add_executable(ProjectRecoverySmoke EXCLUDE_FROM_ALL Source/ProjectRecoverySmoke.cpp)
+target_compile_definitions(ProjectRecoverySmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(ProjectRecoverySmoke PRIVATE
+    juce::juce_gui_basics juce::juce_data_structures
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
 add_executable(PipeWorkspaceSmoke EXCLUDE_FROM_ALL
     Source/EmbeddedScAudioEngine.cpp
