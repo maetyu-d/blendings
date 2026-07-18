@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.6.0 LANGUAGES C CXX)
+project(Blendings VERSION 0.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -178,6 +178,50 @@ target_link_libraries(Blendings PRIVATE
 if(OTHERWARE_HAS_LIBPD)
     target_link_libraries(Blendings PRIVATE otherware_libpd)
 endif()
+
+juce_add_console_app(PlaybackEndToEndSmoke
+    PRODUCT_NAME "Blendings Playback End-to-End Smoke")
+juce_generate_juce_header(PlaybackEndToEndSmoke)
+target_sources(PlaybackEndToEndSmoke PRIVATE
+    Source/EmbeddedScAudioEngine.cpp Source/EmbeddedScAudioEngine.h
+    Source/CarouselEditorComponent.cpp Source/CarouselEditorComponent.h
+    Source/GridEditorComponent.cpp Source/GridEditorComponent.h
+    Source/GridInterpreter.cpp Source/GridInterpreter.h
+    Source/GridModel.cpp Source/GridModel.h
+    Source/InternalEvent.h
+    Source/MusicalObjectEditorComponent.cpp Source/MusicalObjectEditorComponent.h
+    Source/PdAudioEngine.cpp Source/PdAudioEngine.h
+    Source/PipeWorkspaceComponent.cpp Source/PipeWorkspaceComponent.h
+    Source/ScSheetFormula.cpp Source/ScSheetFormula.h
+    Source/ScSheetMath.cpp Source/ScSheetMath.h
+    Source/ScSheetScore.cpp Source/ScSheetScore.h
+    Source/ScSheetTableComponent.cpp Source/ScSheetTableComponent.h
+    Source/ScDiscAudioEngine.cpp Source/ScDiscAudioEngine.h
+    Source/Main.cpp)
+target_compile_definitions(PlaybackEndToEndSmoke PRIVATE
+    BLENDINGS_PLAYBACK_SMOKE=1
+    OTHERWARE_HAS_LIBPD=$<BOOL:${OTHERWARE_HAS_LIBPD}>
+    JUCE_WEB_BROWSER=1 JUCE_USE_CURL=0
+    OTHERWARE_PD_EDITOR_HTML="${CMAKE_CURRENT_SOURCE_DIR}/Source/PdPatchEditor.html"
+    OTHERWARE_PD_EXTRA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/third_party/pure-data/extra"
+    GRIDCOLLIDER_ALCHEMY_SC_ROOT="${BLENDINGS_SC_ROOT}")
+if (EXISTS "${SUPERCOLLIDER_INCLUDE_ROOT}/server/SC_WorldOptions.h")
+    target_include_directories(PlaybackEndToEndSmoke SYSTEM PRIVATE
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/common"
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/plugin_interface"
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/server")
+    target_compile_definitions(PlaybackEndToEndSmoke PRIVATE GRIDCOLLIDER_HAS_SC_HEADERS=1)
+endif()
+target_link_libraries(PlaybackEndToEndSmoke PRIVATE
+    juce::juce_audio_utils juce::juce_data_structures juce::juce_gui_extra
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+if(OTHERWARE_HAS_LIBPD)
+    target_link_libraries(PlaybackEndToEndSmoke PRIVATE otherware_libpd)
+endif()
+
+enable_testing()
+add_test(NAME PlaybackEndToEndSmoke
+    COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Demos/Glass Circuit.otherware")
 
 add_executable(SCAudioSmoke EXCLUDE_FROM_ALL
     Source/EmbeddedScAudioEngine.cpp

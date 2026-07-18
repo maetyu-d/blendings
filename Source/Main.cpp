@@ -27,6 +27,10 @@
 #define OTHERWARE_PD_EXTRA_ROOT ""
 #endif
 
+#ifndef BLENDINGS_PLAYBACK_SMOKE
+#define BLENDINGS_PLAYBACK_SMOKE 0
+#endif
+
 namespace
 {
 constexpr float gridSize = 24.0f;
@@ -799,7 +803,7 @@ enum class ModulationTargetKind
 
 struct Modulator
 {
-    enum class Shape { sine = 0, triangle, square, random };
+    enum class Shape { sine = 0, triangle, square, random, sawUp, sawDown, smoothRandom };
 
     juce::String id { juce::Uuid().toString() };
     juce::Point<float> position;
@@ -807,6 +811,8 @@ struct Modulator
     Shape shape = Shape::sine;
     double cycleBeats = 4.0;
     double phase = 0.0;
+    int clockIndex = 0;
+    bool bipolar = true;
     bool enabled = true;
 };
 
@@ -818,6 +824,7 @@ struct ModulationConnection
     int parameter = 0;
     double depth = 0.5;
     double offset = 0.0;
+    double smoothingBeats = 0.0;
     bool inverted = false;
 };
 
@@ -2522,7 +2529,7 @@ private:
 class ModulatorSettingsComponent final : public juce::Component
 {
 public:
-    ModulatorSettingsComponent (Modulator initial, std::function<void(const Modulator&)> changed)
+    ModulatorSettingsComponent (Modulator initial, juce::StringArray clockNames, std::function<void(const Modulator&)> changed)
         : value (std::move (initial)), onChange (std::move (changed))
     {
         styleEditorLabel (title, 15.0f, true);
@@ -2551,20 +2558,30 @@ public:
         styleEditorLabel (shapeLabel, 12.0f, false);
         shapeLabel.setText ("Shape", juce::dontSendNotification);
         addAndMakeVisible (shapeLabel);
-        shape.addItemList ({ "Sine", "Triangle", "Square", "Random" }, 1);
+        shape.addItemList ({ "Sine", "Triangle", "Square", "Random steps", "Saw up", "Saw down", "Smooth random" }, 1);
         shape.setSelectedId (static_cast<int> (value.shape) + 1, juce::dontSendNotification);
         shape.onChange = [this]
         {
-            value.shape = static_cast<Modulator::Shape> (juce::jlimit (0, 3, shape.getSelectedId() - 1));
+            value.shape = static_cast<Modulator::Shape> (juce::jlimit (0, 6, shape.getSelectedId() - 1));
             notify();
         };
         addAndMakeVisible (shape);
+
+        styleEditorLabel (clockLabel, 12.0f, false); clockLabel.setText ("Clock", juce::dontSendNotification); addAndMakeVisible (clockLabel);
+        clock.addItemList (clockNames, 1); clock.setSelectedId (juce::jlimit (1, clock.getNumItems(), value.clockIndex + 1), juce::dontSendNotification);
+        clock.onChange = [this] { value.clockIndex = juce::jmax (0, clock.getSelectedId() - 1); notify(); }; addAndMakeVisible (clock);
+
+        bipolar.setButtonText ("Bipolar output (- / +)");
+        bipolar.setToggleState (value.bipolar, juce::dontSendNotification);
+        bipolar.setColour (juce::ToggleButton::textColourId, textPrimary());
+        bipolar.onClick = [this] { value.bipolar = bipolar.getToggleState(); notify(); };
+        addAndMakeVisible (bipolar);
 
         configureSlider (cycleLabel, cycle, "Cycle", 0.125, 64.0, 0.125, value.cycleBeats, " beats");
         configureSlider (phaseLabel, phase, "Phase", 0.0, 360.0, 1.0, value.phase * 360.0, " deg");
         cycle.onValueChange = [this] { value.cycleBeats = cycle.getValue(); notify(); };
         phase.onValueChange = [this] { value.phase = phase.getValue() / 360.0; notify(); };
-        setSize (350, 245);
+        setSize (370, 320);
         updateEnabledState();
     }
 
@@ -2579,17 +2596,21 @@ public:
         auto row = area.removeFromTop (39);
         shapeLabel.setBounds (row.removeFromLeft (96));
         shape.setBounds (row.reduced (0, 4));
+        row = area.removeFromTop (39);
+        clockLabel.setBounds (row.removeFromLeft (96));
+        clock.setBounds (row.reduced (0, 4));
         layoutSliderRow (area, cycleLabel, cycle);
         layoutSliderRow (area, phaseLabel, phase);
+        bipolar.setBounds (area.removeFromTop (30).withTrimmedLeft (96));
     }
 
 private:
     Modulator value;
     std::function<void(const Modulator&)> onChange;
-    juce::Label title, nameLabel, shapeLabel, cycleLabel, phaseLabel;
-    juce::ToggleButton enabled;
+    juce::Label title, nameLabel, shapeLabel, clockLabel, cycleLabel, phaseLabel;
+    juce::ToggleButton enabled, bipolar;
     juce::TextEditor name;
-    juce::ComboBox shape;
+    juce::ComboBox shape, clock;
     juce::Slider cycle, phase;
 
     void configureSlider (juce::Label& label, juce::Slider& slider, const juce::String& text,
@@ -2632,7 +2653,7 @@ private:
 
     void updateEnabledState()
     {
-        for (auto* component : std::array<juce::Component*, 4> { &name, &shape, &cycle, &phase })
+        for (auto* component : std::array<juce::Component*, 7> { &name, &shape, &clock, &cycle, &phase, &bipolar, &clockLabel })
             component->setEnabled (value.enabled);
         nameLabel.setEnabled (value.enabled); shapeLabel.setEnabled (value.enabled);
         cycleLabel.setEnabled (value.enabled); phaseLabel.setEnabled (value.enabled);
@@ -2662,7 +2683,7 @@ public:
         styleEditorLabel (depthLabel, 12.0f, false);
         depthLabel.setText ("Depth", juce::dontSendNotification);
         addAndMakeVisible (depthLabel);
-        depth.setRange (0.0, 100.0, 1.0);
+        depth.setRange (-100.0, 100.0, 1.0);
         depth.setValue (value.depth * 100.0, juce::dontSendNotification);
         depth.setSliderStyle (juce::Slider::LinearHorizontal);
         depth.setTextBoxStyle (juce::Slider::TextBoxRight, false, 68, 26);
@@ -2683,12 +2704,20 @@ public:
         offset.onValueChange = [this] { value.offset = offset.getValue() / 100.0; notify(); };
         addAndMakeVisible (offset);
 
+        styleEditorLabel (smoothingLabel, 12.0f, false);
+        smoothingLabel.setText ("Smoothing", juce::dontSendNotification); addAndMakeVisible (smoothingLabel);
+        smoothing.setRange (0.0, 8.0, 0.0625); smoothing.setValue (value.smoothingBeats, juce::dontSendNotification);
+        smoothing.setSliderStyle (juce::Slider::LinearHorizontal);
+        smoothing.setTextBoxStyle (juce::Slider::TextBoxRight, false, 82, 26);
+        smoothing.setTextValueSuffix (" beats"); smoothing.setColour (juce::Slider::thumbColourId, juce::Colour (0xffffc857));
+        smoothing.onValueChange = [this] { value.smoothingBeats = smoothing.getValue(); notify(); }; addAndMakeVisible (smoothing);
+
         inverted.setButtonText ("Invert modulation");
         inverted.setToggleState (value.inverted, juce::dontSendNotification);
         inverted.setColour (juce::ToggleButton::textColourId, textPrimary());
         inverted.onClick = [this] { value.inverted = inverted.getToggleState(); notify(); };
         addAndMakeVisible (inverted);
-        setSize (330, 204);
+        setSize (350, 246);
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (surfaceColour()); }
@@ -2706,17 +2735,98 @@ public:
         row = area.removeFromTop (39);
         offsetLabel.setBounds (row.removeFromLeft (92));
         offset.setBounds (row);
+        row = area.removeFromTop (39);
+        smoothingLabel.setBounds (row.removeFromLeft (92));
+        smoothing.setBounds (row);
         inverted.setBounds (area.removeFromTop (30).withTrimmedLeft (92));
     }
 
 private:
     ModulationConnection value;
     std::function<void(const ModulationConnection&)> onChange;
-    juce::Label title, parameterLabel, depthLabel, offsetLabel;
+    juce::Label title, parameterLabel, depthLabel, offsetLabel, smoothingLabel;
     juce::ComboBox parameter;
-    juce::Slider depth, offset;
+    juce::Slider depth, offset, smoothing;
     juce::ToggleButton inverted;
     void notify() { if (onChange) onChange (value); }
+};
+
+class PipeSettingsComponent final : public juce::Component
+{
+public:
+    PipeSettingsComponent (bool warp, float lengthInGridUnits, std::function<void(bool)> changed)
+        : onChange (std::move (changed))
+    {
+        styleEditorLabel (title, 16.0f, true); title.setText ("Pipe", juce::dontSendNotification); addAndMakeVisible (title);
+        styleEditorLabel (typeLabel, 12.0f, false); typeLabel.setText ("Type", juce::dontSendNotification); addAndMakeVisible (typeLabel);
+        type.addItemList ({ "Flow pipe", "Warp pipe" }, 1);
+        type.setSelectedId (warp ? 2 : 1, juce::dontSendNotification);
+        type.onChange = [this] { if (onChange) onChange (type.getSelectedId() == 2); };
+        addAndMakeVisible (type);
+        styleEditorLabel (lengthLabel, 12.0f, false); lengthLabel.setText ("Length", juce::dontSendNotification); addAndMakeVisible (lengthLabel);
+        styleEditorLabel (lengthValue, 12.0f, true);
+        lengthValue.setText (juce::String (lengthInGridUnits, 1) + " grid units", juce::dontSendNotification);
+        lengthValue.setJustificationType (juce::Justification::centredRight);
+        addAndMakeVisible (lengthValue);
+        setSize (340, 124);
+    }
+
+    void paint (juce::Graphics& g) override { g.fillAll (surfaceColour()); }
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (14, 11);
+        title.setBounds (area.removeFromTop (27)); area.removeFromTop (5);
+        auto row = area.removeFromTop (38); typeLabel.setBounds (row.removeFromLeft (92)); type.setBounds (row.reduced (0, 3));
+        row = area.removeFromTop (30); lengthLabel.setBounds (row.removeFromLeft (92)); lengthValue.setBounds (row);
+    }
+
+private:
+    std::function<void(bool)> onChange;
+    juce::Label title, typeLabel, lengthLabel, lengthValue;
+    juce::ComboBox type;
+};
+
+class SelectionInspectorComponent final : public juce::Component
+{
+public:
+    SelectionInspectorComponent (juce::String selectionName, int selectionCount,
+                                 std::function<void()> duplicateSelection,
+                                 std::function<void()> deleteSelection)
+    {
+        styleEditorLabel (title, 16.0f, true);
+        title.setText (std::move (selectionName), juce::dontSendNotification);
+        addAndMakeVisible (title);
+        styleEditorLabel (summary, 12.0f, false);
+        summary.setText (selectionCount == 1 ? "1 selected" : juce::String (selectionCount) + " selected",
+                         juce::dontSendNotification);
+        addAndMakeVisible (summary);
+        styleEditorButton (duplicate, "Duplicate");
+        styleEditorButton (remove, "Delete");
+        duplicate.onClick = std::move (duplicateSelection);
+        remove.onClick = std::move (deleteSelection);
+        addAndMakeVisible (duplicate);
+        addAndMakeVisible (remove);
+        setSize (340, 126);
+    }
+
+    void paint (juce::Graphics& g) override { g.fillAll (surfaceColour()); }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (14, 11);
+        title.setBounds (area.removeFromTop (26));
+        summary.setBounds (area.removeFromTop (22));
+        area.removeFromTop (12);
+        auto buttons = area.removeFromTop (32);
+        const auto width = (buttons.getWidth() - 8) / 2;
+        duplicate.setBounds (buttons.removeFromLeft (width));
+        buttons.removeFromLeft (8);
+        remove.setBounds (buttons);
+    }
+
+private:
+    juce::Label title, summary;
+    juce::TextButton duplicate, remove;
 };
 
 class RoadCanvas final : public juce::Component,
@@ -2822,7 +2932,22 @@ public:
         bool selected = false;
     };
 
-    struct PerformanceSnapshot { int pipes = 0, drops = 0, devices = 0; double flowUpdateMs = 0.0; size_t contactChecks = 0; };
+    struct PerformanceSnapshot
+    {
+        int pipes = 0, drops = 0, devices = 0;
+        double flowUpdateMs = 0.0;
+        size_t contactChecks = 0, stressWorkUnits = 0;
+        bool stressMode = false;
+    };
+
+    void setPerformanceStressMode (bool shouldStress)
+    {
+        performanceStressMode = shouldStress;
+        if (! performanceStressMode) lastStressWorkUnits = 0;
+    }
+
+    bool isPerformanceStressMode() const noexcept { return performanceStressMode; }
+
     PerformanceSnapshot getPerformanceSnapshot() const
     {
         PerformanceSnapshot result;
@@ -2831,9 +2956,24 @@ public:
         result.devices = static_cast<int> (discs().size() + pipeTaps().size() + pipeDrains().size()
                          + pipeCloners().size() + pipeSpeedLimits().size() + pipeWaits().size()
                          + pipeStrikes().size() + pipeTeleports().size() + pipeFilters().size() + pipeLogics().size());
-        result.flowUpdateMs = lastFlowUpdateMs; result.contactChecks = lastContactChecks;
+        result.flowUpdateMs = lastFlowUpdateMs;
+        result.contactChecks = lastContactChecks;
+        result.stressMode = performanceStressMode;
+        result.stressWorkUnits = lastStressWorkUnits;
         return result;
     }
+
+#if BLENDINGS_PLAYBACK_SMOKE
+    void advanceFlowForTesting (double seconds)
+    {
+        flowRunning = true;
+        lastFlowTimeMs = juce::Time::getMillisecondCounterHiRes()
+                       - juce::jlimit (0.0, 0.1, seconds) * 1000.0;
+        timerCallback();
+    }
+
+    double flowBeatForTesting() const noexcept { return flowBeatPosition; }
+#endif
 
     struct ScCodeInfo
     {
@@ -2857,6 +2997,7 @@ public:
     std::function<void()> onRoutesChanged;
     std::function<void()> onDiscPanelRequested;
     std::function<void()> onSelectionChanged;
+    std::function<void(std::unique_ptr<juce::Component>)> onInspectorRequested;
     std::function<void(int)> onDiscFlowTriggered;
     std::function<bool(const juce::String&)> onDiscPlaybackActive;
 
@@ -2995,6 +3136,16 @@ public:
 
     int getRouteCount() const noexcept { return static_cast<int> (routes().size()); }
     int getDiscCount() const noexcept { return static_cast<int> (discs().size()); }
+    int getSelectionCount() const noexcept { return static_cast<int> (selectedItems.size()); }
+    juce::String getSelectionInspectorTitle() const
+    {
+        if (selectedItems.size() > 1) return "Multiple objects";
+        if (selectedItems.size() == 1 && selectedDisc < 0 && selectedTap < 0 && selectedDrain < 0
+            && selectedCloner < 0 && selectedSpeedLimit < 0 && selectedWait < 0 && selectedStrike < 0
+            && selectedTeleport < 0 && selectedFilter < 0 && selectedLogic < 0)
+            return "Selection";
+        return {};
+    }
 
     bool selectDiscForFlow (int index)
     {
@@ -4500,6 +4651,7 @@ public:
             else if (selectedTeleport >= 0) showTeleportSettings (selectedTeleport);
             else if (selectedFilter >= 0) showFilterSettings (selectedFilter);
             else if (selectedLogic >= 0) showLogicSettings (selectedLogic);
+            else if (selectedRoute >= 0) showRouteSettings (selectedRoute);
             return;
         }
 
@@ -4889,7 +5041,8 @@ public:
                 {
                     const auto sourceId = modulators[static_cast<size_t> (connectingModulator)].id;
                     const auto existing = std::find_if (modulationConnections.begin(), modulationConnections.end(), [&] (const auto& connection)
-                    { return connection.sourceId == sourceId && connection.targetKind == target.kind && connection.targetId == target.id; });
+                    { return connection.sourceId == sourceId && connection.targetKind == target.kind && connection.targetId == target.id
+                             && connection.parameter == 0; });
                     if (existing == modulationConnections.end())
                     {
                         modulationConnections.push_back ({ sourceId, target.kind, target.id });
@@ -4925,6 +5078,7 @@ public:
         {
             marqueeSelecting = false;
             selectItemsInMarquee();
+            notifySelectionChanged();
             repaint();
             return;
         }
@@ -5279,6 +5433,7 @@ public:
         sequencingClocks = std::move (newClocks);
         modulators = std::move (newModulators);
         modulationConnections = std::move (newModulationConnections);
+        modulationSmoothing.clear();
         savedAssemblies = std::move (newAssemblies);
         rootDiscs = std::move (newDiscs);
         normalisePipeJunctions (rootRoutes);
@@ -5306,6 +5461,8 @@ private:
     std::vector<PipeLogic> rootPipeLogics;
     std::vector<Modulator> modulators;
     std::vector<ModulationConnection> modulationConnections;
+    struct ModulationSmoothState { double value = 0.0, beat = 0.0; bool initialised = false; };
+    mutable std::map<juce::String, ModulationSmoothState> modulationSmoothing;
     ClockBank sequencingClocks { defaultSequencingClocks() };
     std::vector<Disc> rootDiscs;
     static constexpr int selectionStride = 100000;
@@ -5538,6 +5695,9 @@ private:
     double lastFlowTimeMs = 0.0;
     double lastFlowUpdateMs = 0.0;
     size_t lastContactChecks = 0;
+    size_t lastStressWorkUnits = 0;
+    size_t stressChecksum = 0;
+    bool performanceStressMode = false;
     double flowBeatPosition = 0.0;
 
     juce::String discKeyForCurrentWorld (int discIndex) const
@@ -5988,6 +6148,8 @@ private:
             child.setProperty ("shape", static_cast<int> (source.shape), nullptr);
             child.setProperty ("cycle", source.cycleBeats, nullptr);
             child.setProperty ("phase", source.phase, nullptr);
+            child.setProperty ("clock", source.clockIndex, nullptr);
+            child.setProperty ("bipolar", source.bipolar, nullptr);
             child.setProperty ("enabled", source.enabled, nullptr);
             tree.addChild (child, -1, nullptr);
         }
@@ -6000,6 +6162,7 @@ private:
             child.setProperty ("parameter", connection.parameter, nullptr);
             child.setProperty ("depth", connection.depth, nullptr);
             child.setProperty ("offset", connection.offset, nullptr);
+            child.setProperty ("smoothing", connection.smoothingBeats, nullptr);
             child.setProperty ("inverted", connection.inverted, nullptr);
             tree.addChild (child, -1, nullptr);
         }
@@ -6020,9 +6183,11 @@ private:
                 source.id = child.getProperty ("id", source.id).toString();
                 source.position = { static_cast<float> (child["x"]), static_cast<float> (child["y"]) };
                 source.name = child.getProperty ("name", "Modulator").toString();
-                source.shape = static_cast<Modulator::Shape> (juce::jlimit (0, 3, static_cast<int> (child.getProperty ("shape", 0))));
+                source.shape = static_cast<Modulator::Shape> (juce::jlimit (0, 6, static_cast<int> (child.getProperty ("shape", 0))));
                 source.cycleBeats = juce::jlimit (0.125, 64.0, static_cast<double> (child.getProperty ("cycle", 4.0)));
                 source.phase = juce::jlimit (0.0, 1.0, static_cast<double> (child.getProperty ("phase", 0.0)));
+                source.clockIndex = juce::jlimit (0, 4, static_cast<int> (child.getProperty ("clock", 0)));
+                source.bipolar = static_cast<bool> (child.getProperty ("bipolar", true));
                 source.enabled = static_cast<bool> (child.getProperty ("enabled", true));
                 sources.push_back (std::move (source));
             }
@@ -6034,8 +6199,9 @@ private:
                     juce::jlimit (0, 9, static_cast<int> (child.getProperty ("targetKind", 0))));
                 connection.targetId = child["target"].toString();
                 connection.parameter = juce::jmax (0, static_cast<int> (child.getProperty ("parameter", 0)));
-                connection.depth = juce::jlimit (0.0, 1.0, static_cast<double> (child.getProperty ("depth", 0.5)));
+                connection.depth = juce::jlimit (-1.0, 1.0, static_cast<double> (child.getProperty ("depth", 0.5)));
                 connection.offset = juce::jlimit (-1.0, 1.0, static_cast<double> (child.getProperty ("offset", 0.0)));
+                connection.smoothingBeats = juce::jlimit (0.0, 8.0, static_cast<double> (child.getProperty ("smoothing", 0.0)));
                 connection.inverted = static_cast<bool> (child.getProperty ("inverted", false));
                 if (connection.sourceId.isNotEmpty() && connection.targetId.isNotEmpty())
                     connections.push_back (std::move (connection));
@@ -6476,6 +6642,7 @@ private:
         selectedLogic = -1;
         selectedModulator = -1;
         selectedModulationConnection = -1;
+        selectedItems.clear();
         connectingModulator = -1;
         draggingModulator = false;
         draggingNode = false;
@@ -6705,6 +6872,9 @@ private:
             case Modulator::Shape::triangle: return "TRI";
             case Modulator::Shape::square:   return "SQR";
             case Modulator::Shape::random:   return "RND";
+            case Modulator::Shape::sawUp:    return "UP";
+            case Modulator::Shape::sawDown:  return "DWN";
+            case Modulator::Shape::smoothRandom: return "SMT";
         }
         return "MOD";
     }
@@ -6712,18 +6882,38 @@ private:
     double modulatorValue (const Modulator& source) const
     {
         if (! source.enabled) return 0.5;
-        const auto cycles = flowBeatPosition / juce::jmax (0.125, source.cycleBeats) + source.phase;
+        auto clockBeat = flowBeatPosition;
+        if (source.clockIndex > 0 && juce::isPositiveAndBelow (source.clockIndex - 1, static_cast<int> (sequencingClocks.size())))
+        {
+            const auto& clock = sequencingClocks[static_cast<size_t> (source.clockIndex - 1)];
+            if (! clock.enabled) return 0.5;
+            clockBeat = flowBeatPosition * clock.ratio + clock.phaseBeats;
+        }
+        const auto cycles = clockBeat / juce::jmax (0.125, source.cycleBeats) + source.phase;
         const auto phase = cycles - std::floor (cycles);
         switch (source.shape)
         {
             case Modulator::Shape::sine:     return 0.5 + 0.5 * std::sin (phase * juce::MathConstants<double>::twoPi);
             case Modulator::Shape::triangle: return 1.0 - std::abs (phase * 2.0 - 1.0);
             case Modulator::Shape::square:   return phase < 0.5 ? 1.0 : 0.0;
+            case Modulator::Shape::sawUp:    return phase;
+            case Modulator::Shape::sawDown:  return 1.0 - phase;
             case Modulator::Shape::random:
             {
                 const auto step = static_cast<int64_t> (std::floor (cycles));
                 juce::Random random (static_cast<int64_t> (source.id.hashCode64()) ^ (step * 0x5deece66dLL));
                 return random.nextDouble();
+            }
+            case Modulator::Shape::smoothRandom:
+            {
+                const auto step = static_cast<int64_t> (std::floor (cycles));
+                const auto randomAt = [&source] (int64_t index)
+                {
+                    juce::Random random (static_cast<int64_t> (source.id.hashCode64()) ^ (index * 0x5deece66dLL));
+                    return random.nextDouble();
+                };
+                const auto eased = phase * phase * (3.0 - 2.0 * phase);
+                return juce::jmap (eased, randomAt (step), randomAt (step + 1));
             }
         }
         return 0.5;
@@ -6737,9 +6927,20 @@ private:
             if (connection.targetKind != kind || connection.targetId != targetId || connection.parameter != parameter) continue;
             const auto source = std::find_if (modulators.begin(), modulators.end(), [&] (const auto& mod) { return mod.id == connection.sourceId; });
             if (source == modulators.end() || ! source->enabled) continue;
-            auto bipolar = modulatorValue (*source) * 2.0 - 1.0;
-            if (connection.inverted) bipolar = -bipolar;
-            signal += bipolar * connection.depth + connection.offset;
+            auto sourceSignal = source->bipolar ? modulatorValue (*source) * 2.0 - 1.0 : modulatorValue (*source);
+            if (connection.inverted) sourceSignal = -sourceSignal;
+            auto contribution = sourceSignal * connection.depth + connection.offset;
+            if (connection.smoothingBeats > 0.0001)
+            {
+                const auto key = connection.sourceId + "|" + juce::String (static_cast<int> (kind)) + "|" + targetId + "|" + juce::String (parameter);
+                auto& state = modulationSmoothing[key];
+                if (! state.initialised) { state.value = contribution; state.beat = flowBeatPosition; state.initialised = true; }
+                const auto elapsed = juce::jmax (0.0, flowBeatPosition - state.beat);
+                const auto alpha = 1.0 - std::exp (-elapsed / connection.smoothingBeats);
+                state.value += (contribution - state.value) * alpha; state.beat = flowBeatPosition;
+                contribution = state.value;
+            }
+            signal += contribution;
         }
         return juce::jlimit (-1.0, 1.0, signal);
     }
@@ -6794,9 +6995,17 @@ private:
                 }();
                 const auto connected = std::any_of (modulationConnections.begin(), modulationConnections.end(), [&] (const auto& connection)
                 { return connection.targetKind == kind && connection.targetId == item.id; });
-                g.setColour ((connected ? cyan : textMuted()).withAlpha (connected ? 0.82f : 0.34f));
+                auto activity = 0.0;
+                if (connected)
+                    for (const auto& connection : modulationConnections)
+                        if (connection.targetKind == kind && connection.targetId == item.id)
+                            if (const auto source = std::find_if (modulators.begin(), modulators.end(), [&] (const auto& mod) { return mod.id == connection.sourceId; });
+                                source != modulators.end() && source->enabled)
+                                activity = juce::jmax (activity, std::abs ((source->bipolar ? modulatorValue (*source) * 2.0 - 1.0
+                                                                                           : modulatorValue (*source)) * connection.depth));
+                g.setColour ((connected ? cyan : textMuted()).withAlpha (connected ? static_cast<float> (0.48 + activity * 0.48) : 0.34f));
                 g.drawEllipse (juce::Rectangle<float> (connected ? 15.0f : 10.0f, connected ? 15.0f : 10.0f).withCentre (position),
-                               connected ? 1.8f : 1.1f);
+                               connected ? static_cast<float> (1.5 + activity * 2.0) : 1.1f);
             }
         };
         drawTarget (ModulationTargetKind::disc, rootDiscs);
@@ -6817,13 +7026,18 @@ private:
             const auto target = modulationTargetPosition (connection.targetKind, connection.targetId);
             if (source == modulators.end() || ! target.has_value()) continue;
             const auto selected = i == selectedModulationConnection;
-            g.setColour (purple.withAlpha (selected ? 0.95f : static_cast<float> (0.36 + connection.depth * 0.42)));
-            g.drawLine ({ source->position, *target }, selected ? 2.6f : 1.5f);
+            const auto liveValue = modulatorValue (*source);
+            const auto signedDepth = connection.depth * (connection.inverted ? -1.0 : 1.0);
+            const auto lineColour = signedDepth < 0.0 ? juce::Colour (0xffff6f91) : purple;
+            g.setColour (lineColour.withAlpha (selected ? 0.95f : static_cast<float> (0.32 + std::abs (connection.depth) * 0.48)));
+            g.drawLine ({ source->position, *target }, selected ? 2.8f : static_cast<float> (1.3 + std::abs (connection.depth)));
             const auto direction = (*target - source->position);
             const auto length = direction.getDistanceFromOrigin();
             if (length > 8.0f)
             {
                 const auto unit = direction / length;
+                g.setColour (cyan.withAlpha (source->enabled ? 0.92f : 0.25f));
+                g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (source->position + direction * static_cast<float> (liveValue)));
                 const auto end = *target - unit * 8.0f;
                 const auto normal = juce::Point<float> (-unit.y, unit.x);
                 juce::Path arrow;
@@ -6832,6 +7046,19 @@ private:
                 arrow.lineTo (end - unit * 6.0f - normal * 3.5f);
                 arrow.closeSubPath();
                 g.fillPath (arrow);
+            }
+            if (selected)
+            {
+                const auto names = modulationParameterNames (connection.targetKind);
+                const auto parameterName = juce::isPositiveAndBelow (connection.parameter, names.size())
+                                             ? names[connection.parameter] : juce::String ("Amount");
+                const auto centre = (source->position + *target) * 0.5f;
+                const auto label = juce::Rectangle<float> (112.0f, 18.0f).withCentre (centre);
+                g.setColour (surfaceColour().withAlpha (0.94f)); g.fillRoundedRectangle (label, 5.0f);
+                g.setColour (lineColour); g.drawRoundedRectangle (label, 5.0f, 1.0f);
+                g.setColour (textPrimary()); g.setFont (juce::FontOptions (9.0f));
+                g.drawText (parameterName + "  " + juce::String (connection.depth * 100.0, 0) + "%",
+                            label.reduced (5.0f, 0.0f), juce::Justification::centred, true);
             }
         }
 
@@ -6877,7 +7104,7 @@ private:
         if (! juce::isPositiveAndBelow (index, static_cast<int> (modulators.size()))) return;
         const auto source = modulators[static_cast<size_t> (index)];
         const auto safeThis = juce::Component::SafePointer<RoadCanvas> (this);
-        auto content = std::make_unique<ModulatorSettingsComponent> (source, [safeThis, index] (const Modulator& updated)
+        auto content = std::make_unique<ModulatorSettingsComponent> (source, sequencingClockNames(), [safeThis, index] (const Modulator& updated)
         {
             if (safeThis == nullptr || ! juce::isPositiveAndBelow (index, static_cast<int> (safeThis->modulators.size()))) return;
             safeThis->modulators[static_cast<size_t> (index)] = updated;
@@ -6886,7 +7113,28 @@ private:
         });
         const auto screen = juce::Point<float> (source.position.x * viewScale + viewOffset.x,
                                                  source.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (14, 14).withCentre (screen), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (14, 14).withCentre (screen));
+    }
+
+    void showRouteSettings (int index)
+    {
+        if (! juce::isPositiveAndBelow (index, static_cast<int> (routes().size()))) return;
+        const auto route = routes()[static_cast<size_t> (index)];
+        if (route.points.empty()) return;
+        const auto safeThis = juce::Component::SafePointer<RoadCanvas> (this);
+        auto content = std::make_unique<PipeSettingsComponent> (route.isWarpPipe, route.getLength() / gridSize,
+            [safeThis, index] (bool warp)
+            {
+                if (safeThis == nullptr || ! juce::isPositiveAndBelow (index, static_cast<int> (safeThis->routes().size()))) return;
+                auto& changed = safeThis->routes()[static_cast<size_t> (index)];
+                changed.isPipe = true;
+                changed.isWarpPipe = warp;
+                safeThis->notifyChanged();
+                safeThis->repaint();
+            });
+        const auto centre = juce::Point<float> (route.points.front().x * viewScale + viewOffset.x,
+                                                route.points.front().y * viewScale + viewOffset.y).roundToInt();
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (centre));
     }
 
     void showModulationConnectionSettings (int index)
@@ -6909,7 +7157,7 @@ private:
             const auto world = (source->position + *target) * 0.5f;
             centre = juce::Point<float> (world.x * viewScale + viewOffset.x, world.y * viewScale + viewOffset.y).roundToInt();
         }
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (14, 14).withCentre (centre), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (14, 14).withCentre (centre));
     }
 
     juce::StringArray sequencingClockNames() const
@@ -6943,7 +7191,7 @@ private:
             safeThis->repaint();
         });
         const auto screenPoint = juce::Point<float> (tap.position.x * viewScale + viewOffset.x, tap.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
     }
 
     void showDrainSettings (int index)
@@ -6960,7 +7208,7 @@ private:
         });
         const auto screenPoint = juce::Point<float> (drain.position.x * viewScale + viewOffset.x,
                                                       drain.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
     }
 
     void showClonerSettings (int index)
@@ -6977,7 +7225,7 @@ private:
         });
         const auto screenPoint = juce::Point<float> (cloner.position.x * viewScale + viewOffset.x,
                                                       cloner.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
     }
 
     void showSpeedLimitSettings (int index)
@@ -6994,7 +7242,7 @@ private:
         });
         const auto screenPoint = juce::Point<float> (limit.position.x * viewScale + viewOffset.x,
                                                       limit.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
     }
 
     void showWaitSettings (int index)
@@ -7011,7 +7259,7 @@ private:
         });
         const auto screenPoint = juce::Point<float> (wait.position.x * viewScale + viewOffset.x,
                                                       wait.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
     }
 
     void showStrikeSettings (int index)
@@ -7026,7 +7274,7 @@ private:
         });
         const auto screenPoint = juce::Point<float> (strike.position.x * viewScale + viewOffset.x,
                                                       strike.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
     }
 
     void showTeleportSettings (int index)
@@ -7049,7 +7297,7 @@ private:
         });
         const auto screenPoint = juce::Point<float> (teleport.position.x * viewScale + viewOffset.x,
                                                       teleport.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
     }
     void showFilterSettings (int index)
     {
@@ -7058,7 +7306,7 @@ private:
         auto content = std::make_unique<FilterSettingsComponent> (filter, [safeThis, index] (const PipeFilter& updated)
         { if (safeThis == nullptr || ! juce::isPositiveAndBelow (index, static_cast<int> (safeThis->pipeFilters().size()))) return; safeThis->pipeFilters()[static_cast<size_t> (index)] = updated; safeThis->notifyChanged(); safeThis->repaint(); });
         const auto screenPoint = juce::Point<float> (filter.position.x * viewScale + viewOffset.x, filter.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
     }
 
     void showLogicSettings (int index)
@@ -7110,7 +7358,21 @@ private:
         });
         const auto screenPoint = juce::Point<float> (logic.position.x * viewScale + viewOffset.x,
                                                       logic.position.y * viewScale + viewOffset.y).roundToInt();
-        juce::CallOutBox::launchAsynchronously (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint), this);
+        presentInspector (std::move (content), juce::Rectangle<int> (12, 12).withCentre (screenPoint));
+    }
+
+    void presentInspector (std::unique_ptr<juce::Component> content, juce::Rectangle<int> anchor)
+    {
+        if (selectedItems.size() > 1)
+            return;
+
+        if (onInspectorRequested != nullptr)
+        {
+            onInspectorRequested (std::move (content));
+            return;
+        }
+
+        juce::CallOutBox::launchAsynchronously (std::move (content), anchor, this);
     }
 
     void zoomAt (juce::Point<float> screenPoint, float zoomFactor)
@@ -8209,6 +8471,7 @@ private:
     void resetFlowPulses()
     {
         flowPulses.clear();
+        modulationSmoothing.clear();
         selectedFlowPulse = -1;
         flowBeatPosition = 0.0;
         for (auto& teleport : pipeTeleports())
@@ -8313,9 +8576,42 @@ private:
         const auto teleportIndex = buildDeviceIndex (pipeTeleports(), devicePosition);
         const auto clonerIndex = buildDeviceIndex (pipeCloners(), devicePosition);
         const auto discSpatialIndex = buildDeviceIndex (discs(), discPosition);
+        lastStressWorkUnits = 0;
+        if (performanceStressMode)
+        {
+            constexpr size_t probeCount = 2048;
+            size_t checksum = 0;
+            for (size_t probe = 0; probe < probeCount; ++probe)
+            {
+                juce::Point<float> position;
+                if (! routes().empty())
+                {
+                    const auto& route = routes()[probe % routes().size()];
+                    const auto length = juce::jmax (1.0f, route.getLength());
+                    position = pointAlongRoute (route, std::fmod (static_cast<float> (probe) * gridSize * 0.37f, length));
+                }
+                else
+                {
+                    position = { static_cast<float> (probe % 64) * gridSize,
+                                 static_cast<float> ((probe / 64) % 64) * gridSize };
+                }
+
+                const auto any = [] (int) { return true; };
+                checksum += static_cast<size_t> (drainIndex.findFirst (position, gridSize, any) + 1);
+                checksum += static_cast<size_t> (speedLimitIndex.findFirst (position, gridSize, any) + 1);
+                checksum += static_cast<size_t> (filterIndex.findFirst (position, gridSize, any) + 1);
+                checksum += static_cast<size_t> (waitIndex.findFirst (position, gridSize, any) + 1);
+                checksum += static_cast<size_t> (strikeIndex.findFirst (position, gridSize, any) + 1);
+                checksum += static_cast<size_t> (teleportIndex.findFirst (position, gridSize, any) + 1);
+                checksum += static_cast<size_t> (clonerIndex.findFirst (position, gridSize, any) + 1);
+                checksum += static_cast<size_t> (discSpatialIndex.findFirst (position, gridSize, any) + 1);
+            }
+            stressChecksum = checksum;
+            lastStressWorkUnits = probeCount * 8;
+        }
         lastContactChecks = flowPulses.size() * (pipeDrains().size() + pipeSpeedLimits().size() + pipeFilters().size()
                             + pipeWaits().size() + pipeStrikes().size() + pipeTeleports().size()
-                            + pipeCloners().size() + discs().size());
+                            + pipeCloners().size() + discs().size()) + lastStressWorkUnits;
         std::vector<FlowPulse> spawnedPulses;
         spawnedPulses.reserve (juce::jmin ((size_t) 256, maxFlowPulses - juce::jmin (maxFlowPulses, flowPulses.size())));
         for (auto& pulse : flowPulses)
@@ -11413,6 +11709,37 @@ private:
     juce::Colour accent { accentColour() };
 };
 
+class InspectorRowBackground final : public juce::Component
+{
+public:
+    explicit InspectorRowBackground (juce::Colour accentToUse) : accent (accentToUse)
+    {
+        setInterceptsMouseClicks (false, false);
+    }
+
+    void setActive (bool shouldBeActive)
+    {
+        if (active == shouldBeActive) return;
+        active = shouldBeActive;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = getLocalBounds().toFloat().reduced (0.5f);
+        g.setColour (raisedSurface().withAlpha (active ? 0.62f : 0.34f));
+        g.fillRoundedRectangle (area, 7.0f);
+        g.setColour (subtleStroke().withAlpha (active ? 0.62f : 0.36f));
+        g.drawRoundedRectangle (area, 7.0f, 1.0f);
+        g.setColour (accent.withAlpha (active ? 0.92f : 0.30f));
+        g.fillRoundedRectangle (area.withWidth (3.0f).reduced (0.0f, 8.0f), 1.5f);
+    }
+
+private:
+    juce::Colour accent;
+    bool active = false;
+};
+
 class StereoMeter final : public juce::Component
 {
 public:
@@ -11661,13 +11988,17 @@ public:
         g.setColour (subtleStroke().withAlpha (0.82f)); g.drawRoundedRectangle (area.reduced (0.5f), 9.0f, 1.0f);
         g.setColour (juce::Colour (0xffff9f43)); g.fillRoundedRectangle ({ 0.0f, 12.0f, 3.0f, area.getHeight() - 24.0f }, 1.5f);
         g.setColour (textPrimary()); g.setFont (juce::FontOptions (12.0f).withStyle ("Bold"));
-        g.drawText ("PERFORMANCE", 18, 10, getWidth() - 32, 18, juce::Justification::centredLeft);
+        g.drawText (snapshot.stressMode ? "PERFORMANCE / STRESS 8x" : "PERFORMANCE",
+                    18, 10, getWidth() - 32, 18, juce::Justification::centredLeft);
         g.setColour (textMuted()); g.setFont (juce::FontOptions (10.5f));
         g.drawText (juce::String (snapshot.flowUpdateMs, 2) + " ms flow update   " + juce::String (audioLoad, 1) + "% audio",
                     18, 34, getWidth() - 32, 17, juce::Justification::centredLeft);
         g.drawText (juce::String (snapshot.drops) + " drops   " + juce::String (snapshot.devices) + " devices   "
                     + juce::String (snapshot.pipes) + " pipes", 18, 55, getWidth() - 32, 17, juce::Justification::centredLeft);
-        g.drawText (juce::String ((int64) snapshot.contactChecks) + " contact candidates", 18, 76, getWidth() - 32, 17,
+        auto contacts = juce::String ((int64) snapshot.contactChecks) + " contact candidates";
+        if (snapshot.stressMode)
+            contacts << "  /  " << juce::String ((int64) snapshot.stressWorkUnits) << " shadow probes";
+        g.drawText (contacts, 18, 76, getWidth() - 32, 17,
                     juce::Justification::centredLeft);
     }
 private:
@@ -11788,58 +12119,81 @@ public:
         addAndMakeVisible (layersModulationButton);
         addAndMakeVisible (dataPaneTitle);
         addAndMakeVisible (dataPaneSummary);
-        addAndMakeVisible (triggerModeLabel);
-        addAndMakeVisible (triggerModeBox);
-        addAndMakeVisible (holdDropsToggle);
-        addAndMakeVisible (discLevelSlider); addAndMakeVisible (discPanSlider);
-        addAndMakeVisible (discMuteButton); addAndMakeVisible (discSoloButton);
-        addAndMakeVisible (elementModeLabel);
-        addAndMakeVisible (elementModeBox);
-        addAndMakeVisible (elementProbabilityBox);
-        addAndMakeVisible (nestedWorldDot);
-        addAndMakeVisible (scCodeDot);
-        addAndMakeVisible (pdPatchDot);
-        addAndMakeVisible (scSheetDot);
-        addAndMakeVisible (orcaGridDot);
-        addAndMakeVisible (carouselDot);
-        addAndMakeVisible (pipeWorldDot);
-        addAndMakeVisible (worldLabel);
-        addAndMakeVisible (worldInfoLabel);
-        addAndMakeVisible (worldRemoveButton);
-        addAndMakeVisible (worldAddButton);
-        addAndMakeVisible (worldEnterButton);
-        addAndMakeVisible (scCodeLabel);
-        addAndMakeVisible (scCodeOpenButton);
-        addAndMakeVisible (scCodeMinusButton);
-        addAndMakeVisible (scCodePlusButton);
-        addAndMakeVisible (scCodeInfoLabel);
-        addAndMakeVisible (pdPatchLabel);
-        addAndMakeVisible (pdPatchOpenButton);
-        addAndMakeVisible (pdPatchMinusButton);
-        addAndMakeVisible (pdPatchPlusButton);
-        addAndMakeVisible (pdPatchInfoLabel);
-        addAndMakeVisible (scSheetLabel);
-        addAndMakeVisible (scSheetOpenButton);
-        addAndMakeVisible (scSheetMinusButton);
-        addAndMakeVisible (scSheetPlusButton);
-        addAndMakeVisible (scSheetInfoLabel);
-        addAndMakeVisible (orcaGridLabel);
-        addAndMakeVisible (orcaGridOpenButton);
-        addAndMakeVisible (orcaGridMinusButton);
-        addAndMakeVisible (orcaGridPlusButton);
-        addAndMakeVisible (orcaGridInfoLabel);
-        addAndMakeVisible (carouselLabel);
-        addAndMakeVisible (carouselOpenButton);
-        addAndMakeVisible (carouselMinusButton);
-        addAndMakeVisible (carouselPlusButton);
-        addAndMakeVisible (carouselInfoLabel);
-        addAndMakeVisible (pipeWorldLabel);
-        addAndMakeVisible (pipeWorldOpenButton);
-        addAndMakeVisible (pipeWorldMinusButton);
-        addAndMakeVisible (pipeWorldPlusButton);
-        addAndMakeVisible (pipeWorldInfoLabel);
         addAndMakeVisible (fireDiscButton);
         addAndMakeVisible (dataPaneCloseButton);
+        addChildComponent (dataPaneViewport);
+        dataPaneViewport.setViewedComponent (&dataPaneContent, false);
+
+        dataPaneContent.addAndMakeVisible (playbackSectionLabel);
+        dataPaneContent.addAndMakeVisible (triggerModeLabel);
+        dataPaneContent.addAndMakeVisible (triggerModeBox);
+        dataPaneContent.addAndMakeVisible (holdDropsToggle);
+        dataPaneContent.addAndMakeVisible (elementModeLabel);
+        dataPaneContent.addAndMakeVisible (elementModeBox);
+        dataPaneContent.addAndMakeVisible (elementProbabilityBox);
+        dataPaneContent.addAndMakeVisible (mixSectionLabel);
+        dataPaneContent.addAndMakeVisible (discLevelLabel);
+        dataPaneContent.addAndMakeVisible (discLevelSlider);
+        dataPaneContent.addAndMakeVisible (discPanLabel);
+        dataPaneContent.addAndMakeVisible (discPanSlider);
+        dataPaneContent.addAndMakeVisible (discMuteButton);
+        dataPaneContent.addAndMakeVisible (discSoloButton);
+        dataPaneContent.addAndMakeVisible (elementsSectionLabel);
+        dataPaneContent.addAndMakeVisible (contentSectionLabel);
+
+        dataPaneContent.addAndMakeVisible (nestedWorldRowBackground);
+        dataPaneContent.addAndMakeVisible (scCodeRowBackground);
+        dataPaneContent.addAndMakeVisible (pdPatchRowBackground);
+        dataPaneContent.addAndMakeVisible (scSheetRowBackground);
+        dataPaneContent.addAndMakeVisible (orcaGridRowBackground);
+        dataPaneContent.addAndMakeVisible (carouselRowBackground);
+        dataPaneContent.addAndMakeVisible (pipeWorldRowBackground);
+
+        dataPaneContent.addAndMakeVisible (nestedWorldDot);
+        dataPaneContent.addAndMakeVisible (scCodeDot);
+        dataPaneContent.addAndMakeVisible (pdPatchDot);
+        dataPaneContent.addAndMakeVisible (scSheetDot);
+        dataPaneContent.addAndMakeVisible (orcaGridDot);
+        dataPaneContent.addAndMakeVisible (carouselDot);
+        dataPaneContent.addAndMakeVisible (pipeWorldDot);
+        dataPaneContent.addAndMakeVisible (worldLabel);
+        dataPaneContent.addAndMakeVisible (worldInfoLabel);
+        dataPaneContent.addAndMakeVisible (worldRemoveButton);
+        dataPaneContent.addAndMakeVisible (worldAddButton);
+        dataPaneContent.addAndMakeVisible (worldEnterButton);
+        dataPaneContent.addAndMakeVisible (scCodeLabel);
+        dataPaneContent.addAndMakeVisible (scCodeOpenButton);
+        dataPaneContent.addAndMakeVisible (scCodeMinusButton);
+        dataPaneContent.addAndMakeVisible (scCodePlusButton);
+        dataPaneContent.addAndMakeVisible (scCodeInfoLabel);
+        dataPaneContent.addAndMakeVisible (pdPatchLabel);
+        dataPaneContent.addAndMakeVisible (pdPatchOpenButton);
+        dataPaneContent.addAndMakeVisible (pdPatchMinusButton);
+        dataPaneContent.addAndMakeVisible (pdPatchPlusButton);
+        dataPaneContent.addAndMakeVisible (pdPatchInfoLabel);
+        dataPaneContent.addAndMakeVisible (scSheetLabel);
+        dataPaneContent.addAndMakeVisible (scSheetOpenButton);
+        dataPaneContent.addAndMakeVisible (scSheetMinusButton);
+        dataPaneContent.addAndMakeVisible (scSheetPlusButton);
+        dataPaneContent.addAndMakeVisible (scSheetInfoLabel);
+        dataPaneContent.addAndMakeVisible (orcaGridLabel);
+        dataPaneContent.addAndMakeVisible (orcaGridOpenButton);
+        dataPaneContent.addAndMakeVisible (orcaGridMinusButton);
+        dataPaneContent.addAndMakeVisible (orcaGridPlusButton);
+        dataPaneContent.addAndMakeVisible (orcaGridInfoLabel);
+        dataPaneContent.addAndMakeVisible (carouselLabel);
+        dataPaneContent.addAndMakeVisible (carouselOpenButton);
+        dataPaneContent.addAndMakeVisible (carouselMinusButton);
+        dataPaneContent.addAndMakeVisible (carouselPlusButton);
+        dataPaneContent.addAndMakeVisible (carouselInfoLabel);
+        dataPaneContent.addAndMakeVisible (pipeWorldLabel);
+        dataPaneContent.addAndMakeVisible (pipeWorldOpenButton);
+        dataPaneContent.addAndMakeVisible (pipeWorldMinusButton);
+        dataPaneContent.addAndMakeVisible (pipeWorldPlusButton);
+        dataPaneContent.addAndMakeVisible (pipeWorldInfoLabel);
+        addChildComponent (contextualInspectorTitle);
+        addChildComponent (contextualInspectorCloseButton);
+        addChildComponent (contextualInspectorViewport);
 
         selectButton.setRadioGroupId (1001);
         drawButton.setRadioGroupId (1001);
@@ -12181,6 +12535,12 @@ public:
         layersModulationButton.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffa96de8));
         configurePaneLabel (dataPaneTitle, 18.0f, true);
         configurePaneLabel (dataPaneSummary, 13.0f, false);
+        for (auto* section : { &playbackSectionLabel, &mixSectionLabel, &elementsSectionLabel, &contentSectionLabel })
+            configurePaneLabel (*section, 11.0f, true);
+        playbackSectionLabel.setText ("PLAYBACK", juce::dontSendNotification);
+        mixSectionLabel.setText ("OUTPUT", juce::dontSendNotification);
+        elementsSectionLabel.setText ("ELEMENTS", juce::dontSendNotification);
+        contentSectionLabel.setText ("ADD CONTENT", juce::dontSendNotification);
         configurePaneLabel (triggerModeLabel, 12.0f, false);
         triggerModeLabel.setText ("Trigger", juce::dontSendNotification);
         triggerModeBox.addItem ("Every drop", 1);
@@ -12209,7 +12569,15 @@ public:
         configureMixSlider (discLevelSlider); configureMixSlider (discPanSlider);
         discLevelSlider.setRange (0.0, 1.5, 0.01); discLevelSlider.setTextValueSuffix ("x");
         discPanSlider.setRange (-1.0, 1.0, 0.01);
+        configurePaneLabel (discLevelLabel, 12.0f, false);
+        configurePaneLabel (discPanLabel, 12.0f, false);
+        discLevelLabel.setText ("Level", juce::dontSendNotification);
+        discPanLabel.setText ("Pan", juce::dontSendNotification);
+        discLevelSlider.setTooltip ("Disc output level");
+        discPanSlider.setTooltip ("Disc stereo position");
         configurePaneButton (discMuteButton, "M"); configurePaneButton (discSoloButton, "S");
+        discMuteButton.setTooltip ("Mute this disc");
+        discSoloButton.setTooltip ("Solo this disc");
         discMuteButton.setClickingTogglesState (true); discSoloButton.setClickingTogglesState (true);
         const auto updateMix = [this] { canvas.setSelectedDiscMix (static_cast<float> (discLevelSlider.getValue()), static_cast<float> (discPanSlider.getValue()), discMuteButton.getToggleState(), discSoloButton.getToggleState()); };
         discLevelSlider.onValueChange = updateMix; discPanSlider.onValueChange = updateMix; discMuteButton.onClick = updateMix; discSoloButton.onClick = updateMix;
@@ -12248,39 +12616,53 @@ public:
         configurePaneLabel (worldInfoLabel, 12.0f, false);
         configurePaneButton (worldRemoveButton, "-");
         configurePaneButton (worldAddButton, "+");
-        configurePaneButton (worldEnterButton, "enter");
+        configurePaneButton (worldEnterButton, "Enter");
         configurePaneLabel (scCodeLabel, 13.0f, true);
-        configurePaneButton (scCodeOpenButton, "open");
+        configurePaneButton (scCodeOpenButton, "Open");
         configurePaneButton (scCodeMinusButton, "-");
         configurePaneButton (scCodePlusButton, "+");
         configurePaneLabel (scCodeInfoLabel, 12.0f, false);
         configurePaneLabel (pdPatchLabel, 13.0f, true);
-        configurePaneButton (pdPatchOpenButton, "open");
+        configurePaneButton (pdPatchOpenButton, "Open");
         configurePaneButton (pdPatchMinusButton, "-");
         configurePaneButton (pdPatchPlusButton, "+");
         configurePaneLabel (pdPatchInfoLabel, 12.0f, false);
         configurePaneLabel (scSheetLabel, 13.0f, true);
-        configurePaneButton (scSheetOpenButton, "open");
+        configurePaneButton (scSheetOpenButton, "Open");
         configurePaneButton (scSheetMinusButton, "-");
         configurePaneButton (scSheetPlusButton, "+");
         configurePaneLabel (scSheetInfoLabel, 12.0f, false);
         configurePaneLabel (orcaGridLabel, 13.0f, true);
-        configurePaneButton (orcaGridOpenButton, "open");
+        configurePaneButton (orcaGridOpenButton, "Open");
         configurePaneButton (orcaGridMinusButton, "-");
         configurePaneButton (orcaGridPlusButton, "+");
         configurePaneLabel (orcaGridInfoLabel, 12.0f, false);
         configurePaneLabel (carouselLabel, 13.0f, true);
-        configurePaneButton (carouselOpenButton, "open");
+        configurePaneButton (carouselOpenButton, "Open");
         configurePaneButton (carouselMinusButton, "-");
         configurePaneButton (carouselPlusButton, "+");
         configurePaneLabel (carouselInfoLabel, 12.0f, false);
         configurePaneLabel (pipeWorldLabel, 13.0f, true);
-        configurePaneButton (pipeWorldOpenButton, "open");
+        configurePaneButton (pipeWorldOpenButton, "Open");
         configurePaneButton (pipeWorldMinusButton, "-");
         configurePaneButton (pipeWorldPlusButton, "+");
         configurePaneLabel (pipeWorldInfoLabel, 12.0f, false);
-        configurePaneButton (fireDiscButton, "fire");
-        configurePaneButton (dataPaneCloseButton, "close");
+        configurePaneButton (fireDiscButton, "Fire");
+        configurePaneButton (dataPaneCloseButton, "Done");
+        fireDiscButton.setColour (juce::TextButton::buttonColourId, accentColour().withAlpha (0.82f));
+        fireDiscButton.setColour (juce::TextButton::buttonOnColourId, accentColour());
+        dataPaneViewport.setScrollBarsShown (true, false);
+        dataPaneViewport.setScrollBarThickness (5);
+        dataPaneViewport.setColour (juce::ScrollBar::thumbColourId, textMuted().withAlpha (0.45f));
+        dataPaneViewport.setColour (juce::ScrollBar::trackColourId, juce::Colours::transparentBlack);
+        configurePaneLabel (contextualInspectorTitle, 11.0f, true);
+        contextualInspectorTitle.setText ("INSPECTOR", juce::dontSendNotification);
+        configurePaneButton (contextualInspectorCloseButton, "Done");
+        contextualInspectorCloseButton.onClick = [this] { closeContextualInspector(); };
+        contextualInspectorViewport.setScrollBarsShown (true, false);
+        contextualInspectorViewport.setScrollBarThickness (5);
+        contextualInspectorViewport.setColour (juce::ScrollBar::thumbColourId, textMuted().withAlpha (0.45f));
+        contextualInspectorViewport.setColour (juce::ScrollBar::trackColourId, juce::Colours::transparentBlack);
 
         canvas.onRoutesChanged = [this]
         {
@@ -12301,7 +12683,9 @@ public:
         };
         canvas.onDiscPanelRequested = [this]
         {
+            closeContextualInspector (false);
             dataPaneOpen = canvas.getSelectedDiscInfo().valid;
+            dataPaneViewport.setViewPosition (0, 0);
             refreshDataPane();
             refreshLayersPanel();
             resized();
@@ -12311,15 +12695,35 @@ public:
         {
             refreshLayersPanel();
 
-            if (dataPaneOpen)
+            const auto discSelected = canvas.getSelectedDiscInfo().valid;
+            if (discSelected)
             {
-                dataPaneOpen = canvas.getSelectedDiscInfo().valid;
+                closeContextualInspector (false);
+                dataPaneOpen = true;
+                dataPaneViewport.setViewPosition (0, 0);
                 refreshDataPane();
                 resized();
+            }
+            else
+            {
+                dataPaneOpen = false;
+                setPaneComponentsVisible (false);
+                const auto selectionTitle = canvas.getSelectionInspectorTitle();
+                if (selectionTitle.isNotEmpty())
+                    showSelectionInspector (selectionTitle, canvas.getSelectionCount());
+                else
+                {
+                    closeContextualInspector (false);
+                    resized();
+                }
             }
 
             updateStatus();
             repaint();
+        };
+        canvas.onInspectorRequested = [this] (std::unique_ptr<juce::Component> content)
+        {
+            showContextualInspector (std::move (content));
         };
         canvas.onDiscFlowTriggered = [this] (int discIndex)
         {
@@ -12515,7 +12919,7 @@ public:
                 g.drawVerticalLine (transportSeparatorX, transport.getY() + 7.0f, transport.getBottom() - 7.0f);
         }
 
-        if (dataPaneOpen)
+        if (dataPaneOpen || contextualInspectorOpen)
         {
             const auto pane = getDataPaneBounds().toFloat();
             g.setColour (surfaceColour());
@@ -12523,14 +12927,6 @@ public:
             g.setColour (subtleStroke().withAlpha (0.72f));
             g.drawVerticalLine (static_cast<int> (pane.getX()), pane.getY(), pane.getBottom());
 
-            const auto info = canvas.getSelectedDiscInfo();
-            paintPaneRow (g, nestedWorldRowBounds, worldElementColour(), info.valid && info.nestedWorldCount > 0);
-            paintPaneRow (g, scCodeRowBounds, scCodeElementColour(), info.valid && info.scCodeCount > 0);
-            paintPaneRow (g, pdPatchRowBounds, pdPatchElementColour(), info.valid && info.pdPatchCount > 0);
-            paintPaneRow (g, scSheetRowBounds, scSheetElementColour(), info.valid && info.scSheetCount > 0);
-            paintPaneRow (g, orcaGridRowBounds, orcaGridElementColour(), info.valid && info.orcaGridCount > 0);
-            paintPaneRow (g, carouselRowBounds, carouselElementColour(), info.valid && info.carouselCount > 0);
-            paintPaneRow (g, pipeWorldRowBounds, pipeElementColour(), info.valid && info.pipeWorldCount > 0);
         }
 
     }
@@ -12566,80 +12962,121 @@ public:
         masterMeter.setBounds (toolbar.removeFromRight (48).reduced (3, 13));
         auto dataPane = getDataPaneBounds();
 
-        if (dataPaneOpen)
+        if (dataPaneOpen || contextualInspectorOpen)
         {
             bounds.removeFromRight (dataPane.getWidth());
             dataPane = getDataPaneBounds().reduced (18, 18);
-            auto bottomControls = dataPane.removeFromBottom (78);
-
-            auto titleRow = dataPane.removeFromTop (30);
-            dataPaneTitle.setBounds (titleRow.removeFromLeft (74));
-            triggerModeLabel.setBounds (titleRow.removeFromLeft (48));
-            triggerModeBox.setBounds (titleRow);
-            dataPane.removeFromTop (4);
-            dataPaneSummary.setBounds (dataPane.removeFromTop (22));
-            dataPane.removeFromTop (5);
-            holdDropsToggle.setBounds (dataPane.removeFromTop (28));
-            dataPane.removeFromTop (5);
-            auto timelineRow = dataPane.removeFromTop (30);
-            elementModeLabel.setBounds (timelineRow.removeFromLeft (58));
-            if (elementProbabilityBox.isVisible())
+            if (contextualInspectorOpen)
             {
-                elementProbabilityBox.setBounds (timelineRow.removeFromRight (66));
-                timelineRow.removeFromRight (7);
+                auto inspectorHeader = dataPane.removeFromTop (30);
+                contextualInspectorTitle.setBounds (inspectorHeader.removeFromLeft (110));
+                contextualInspectorCloseButton.setBounds (inspectorHeader.removeFromRight (58));
+                dataPane.removeFromTop (8);
+                contextualInspectorViewport.setBounds (dataPane);
+                if (contextualInspectorContent != nullptr)
+                {
+                    const auto contentHeight = juce::jmax (contextualInspectorContent->getHeight(), dataPane.getHeight());
+                    contextualInspectorContent->setSize (juce::jmax (320, dataPane.getWidth() - 7), contentHeight);
+                }
             }
-            elementModeBox.setBounds (timelineRow);
-            dataPane.removeFromTop (7);
-            auto mixRow = dataPane.removeFromTop (28);
-            discLevelSlider.setBounds (mixRow.removeFromLeft (juce::jmax (130, mixRow.getWidth() / 2)));
-            mixRow.removeFromLeft (7); discPanSlider.setBounds (mixRow.removeFromLeft (juce::jmax (110, mixRow.getWidth() - 70)));
-            mixRow.removeFromLeft (7); discMuteButton.setBounds (mixRow.removeFromLeft (28)); mixRow.removeFromLeft (4); discSoloButton.setBounds (mixRow.removeFromLeft (28));
-            dataPane.removeFromTop (9);
-
-            const auto dotColumns = juce::jmax (1, dataPane.getWidth() / 35);
-            const auto dotRows = elementDots.empty() ? 1
-                                                     : juce::jlimit (1, 3, (static_cast<int> (elementDots.size()) + dotColumns - 1) / dotColumns);
-            auto dotRow = dataPane.removeFromTop (dotRows * 29);
-
-            for (int i = 0; i < static_cast<int> (elementDots.size()); ++i)
+            else
             {
-                const auto column = i % dotColumns;
-                const auto rowIndex = i / dotColumns;
-                elementDots[static_cast<size_t> (i)]->setBounds (dotRow.getX() + column * 35,
-                                                                 dotRow.getY() + rowIndex * 29,
-                                                                 29,
-                                                                 29);
+                auto actions = dataPane.removeFromBottom (42);
+                dataPane.removeFromBottom (12);
+                dataPaneTitle.setBounds (dataPane.removeFromTop (28));
+                dataPaneSummary.setBounds (dataPane.removeFromTop (20));
+                dataPane.removeFromTop (10);
+                dataPaneViewport.setBounds (dataPane);
+
+                const auto contentWidth = juce::jmax (300, dataPane.getWidth() - 7);
+                const auto dotColumns = juce::jmax (1, contentWidth / 35);
+                const auto dotRows = elementDots.empty() ? 1
+                                                         : juce::jmax (1, (static_cast<int> (elementDots.size()) + dotColumns - 1) / dotColumns);
+                const auto contentHeight = 744 + juce::jmax (0, dotRows - 1) * 29;
+                dataPaneContent.setSize (contentWidth, juce::jmax (contentHeight, dataPane.getHeight()));
+                auto content = dataPaneContent.getLocalBounds().reduced (2, 0);
+
+                playbackSectionLabel.setBounds (content.removeFromTop (18));
+                content.removeFromTop (4);
+                auto triggerRow = content.removeFromTop (32);
+                triggerModeLabel.setBounds (triggerRow.removeFromLeft (66));
+                triggerModeBox.setBounds (triggerRow);
+                content.removeFromTop (5);
+                holdDropsToggle.setBounds (content.removeFromTop (26));
+                content.removeFromTop (5);
+                auto timelineRow = content.removeFromTop (32);
+                elementModeLabel.setBounds (timelineRow.removeFromLeft (66));
+                if (elementProbabilityBox.isVisible())
+                {
+                    elementProbabilityBox.setBounds (timelineRow.removeFromRight (66));
+                    timelineRow.removeFromRight (7);
+                }
+                elementModeBox.setBounds (timelineRow);
+                content.removeFromTop (12);
+
+                mixSectionLabel.setBounds (content.removeFromTop (18));
+                content.removeFromTop (4);
+                auto levelRow = content.removeFromTop (30);
+                discLevelLabel.setBounds (levelRow.removeFromLeft (44));
+                discSoloButton.setBounds (levelRow.removeFromRight (28));
+                levelRow.removeFromRight (4);
+                discMuteButton.setBounds (levelRow.removeFromRight (28));
+                levelRow.removeFromRight (7);
+                discLevelSlider.setBounds (levelRow);
+                content.removeFromTop (5);
+                auto panRow = content.removeFromTop (30);
+                discPanLabel.setBounds (panRow.removeFromLeft (44));
+                discPanSlider.setBounds (panRow);
+                content.removeFromTop (12);
+
+                elementsSectionLabel.setBounds (content.removeFromTop (18));
+                content.removeFromTop (4);
+                auto dotRow = content.removeFromTop (dotRows * 29);
+                for (int i = 0; i < static_cast<int> (elementDots.size()); ++i)
+                {
+                    const auto column = i % dotColumns;
+                    const auto rowIndex = i / dotColumns;
+                    elementDots[static_cast<size_t> (i)]->setBounds (dotRow.getX() + column * 35,
+                                                                     dotRow.getY() + rowIndex * 29,
+                                                                     29,
+                                                                     29);
+                }
+                content.removeFromTop (10);
+                contentSectionLabel.setBounds (content.removeFromTop (18));
+                content.removeFromTop (6);
+
+                const auto layoutRow = [&content] (InspectorRowBackground& background,
+                                                   juce::Label& label,
+                                                   juce::Label& info,
+                                                   juce::TextButton* open,
+                                                   juce::TextButton& remove,
+                                                   juce::TextButton& add)
+                {
+                    const auto row = content.removeFromTop (54);
+                    background.setBounds (row);
+                    layoutPaneRow (row, label, info, open, remove, add);
+                    content.removeFromTop (6);
+                };
+
+                layoutRow (nestedWorldRowBackground, worldLabel, worldInfoLabel, &worldEnterButton, worldRemoveButton, worldAddButton);
+                layoutRow (scCodeRowBackground, scCodeLabel, scCodeInfoLabel, &scCodeOpenButton, scCodeMinusButton, scCodePlusButton);
+                layoutRow (pdPatchRowBackground, pdPatchLabel, pdPatchInfoLabel, &pdPatchOpenButton, pdPatchMinusButton, pdPatchPlusButton);
+                layoutRow (scSheetRowBackground, scSheetLabel, scSheetInfoLabel, &scSheetOpenButton, scSheetMinusButton, scSheetPlusButton);
+                layoutRow (orcaGridRowBackground, orcaGridLabel, orcaGridInfoLabel, &orcaGridOpenButton, orcaGridMinusButton, orcaGridPlusButton);
+                layoutRow (carouselRowBackground, carouselLabel, carouselInfoLabel, &carouselOpenButton, carouselMinusButton, carouselPlusButton);
+                layoutRow (pipeWorldRowBackground, pipeWorldLabel, pipeWorldInfoLabel, &pipeWorldOpenButton, pipeWorldMinusButton, pipeWorldPlusButton);
+
+                const auto info = canvas.getSelectedDiscInfo();
+                const auto canFire = info.soundElementCount > 0 || info.hasNestedWorld || info.hasScCode
+                                  || info.hasPdPatch || info.hasScSheet || info.hasOrcaGrid
+                                  || info.hasCarousel || info.hasPipeWorld;
+                if (canFire)
+                {
+                    fireDiscButton.setBounds (actions.removeFromLeft ((actions.getWidth() - 8) * 2 / 3));
+                    actions.removeFromLeft (8);
+                }
+                dataPaneCloseButton.setBounds (actions);
             }
-            dataPane.removeFromTop (14);
-
-            nestedWorldRowBounds = dataPane.removeFromTop (56);
-            layoutPaneRow (nestedWorldRowBounds, worldLabel, worldInfoLabel, &worldEnterButton, worldRemoveButton, worldAddButton);
-            dataPane.removeFromTop (8);
-
-            scCodeRowBounds = dataPane.removeFromTop (56);
-            layoutPaneRow (scCodeRowBounds, scCodeLabel, scCodeInfoLabel, &scCodeOpenButton, scCodeMinusButton, scCodePlusButton);
-            dataPane.removeFromTop (8);
-
-            pdPatchRowBounds = dataPane.removeFromTop (56);
-            layoutPaneRow (pdPatchRowBounds, pdPatchLabel, pdPatchInfoLabel, &pdPatchOpenButton, pdPatchMinusButton, pdPatchPlusButton);
-            dataPane.removeFromTop (8);
-
-            scSheetRowBounds = dataPane.removeFromTop (56);
-            layoutPaneRow (scSheetRowBounds, scSheetLabel, scSheetInfoLabel, &scSheetOpenButton, scSheetMinusButton, scSheetPlusButton);
-            dataPane.removeFromTop (8);
-
-            orcaGridRowBounds = dataPane.removeFromTop (56);
-            layoutPaneRow (orcaGridRowBounds, orcaGridLabel, orcaGridInfoLabel, &orcaGridOpenButton, orcaGridMinusButton, orcaGridPlusButton);
-            dataPane.removeFromTop (8);
-            carouselRowBounds = dataPane.removeFromTop (56);
-            layoutPaneRow (carouselRowBounds, carouselLabel, carouselInfoLabel, &carouselOpenButton, carouselMinusButton, carouselPlusButton);
-            dataPane.removeFromTop (8);
-            pipeWorldRowBounds = dataPane.removeFromTop (56);
-            layoutPaneRow (pipeWorldRowBounds, pipeWorldLabel, pipeWorldInfoLabel, &pipeWorldOpenButton, pipeWorldMinusButton, pipeWorldPlusButton);
-
-            fireDiscButton.setBounds (bottomControls.removeFromTop (32));
-            bottomControls.removeFromTop (10);
-            dataPaneCloseButton.setBounds (bottomControls.removeFromTop (32));
         }
 
         constexpr int toolPanelWidth = 58;
@@ -12725,6 +13162,9 @@ public:
         }
 
         setPaneComponentsVisible (dataPaneOpen);
+        contextualInspectorTitle.setVisible (contextualInspectorOpen);
+        contextualInspectorCloseButton.setVisible (contextualInspectorOpen);
+        contextualInspectorViewport.setVisible (contextualInspectorOpen);
         canvas.setBounds (bounds);
     }
 
@@ -12760,7 +13200,8 @@ public:
             menu.addItem (menuSaveProject, "Save\tCmd+S");
             menu.addItem (menuSaveProjectAs, "Save As...\tShift+Cmd+S");
             menu.addSeparator();
-            menu.addItem (menuRecordWav, isMasterRecording() ? "Stop Recording" : "Record WAV...");
+            menu.addItem (menuRecordWav, isMasterRecording() ? "Stop Recording and Save" : "Record Master WAV...");
+            menu.addItem (menuRevealRecording, "Reveal Last Recording", lastRecordingFile.existsAsFile());
             menu.addSeparator();
             menu.addItem (menuClose, "Close\tCmd+W");
         }
@@ -12799,6 +13240,7 @@ public:
             menu.addItem (menuFlowDebug, "Flow Debug Overlay", true, flowDebugVisible);
             menu.addItem (menuAudioDiagnostics, "Audio Diagnostics", true, audioDiagnosticsVisible);
             menu.addItem (menuPerformanceDiagnostics, "Performance Diagnostics", true, performanceDiagnosticsVisible);
+            menu.addItem (menuPerformanceStress, "Performance Stress Mode", true, performanceStressMode);
             menu.addItem (menuAudioSettings, "Audio Settings...");
         }
         return menu;
@@ -12817,6 +13259,10 @@ public:
             else
                 chooseMasterRecordingFile();
             menuItemsChanged();
+        }
+        else if (itemId == menuRevealRecording)
+        {
+            if (lastRecordingFile.existsAsFile()) lastRecordingFile.revealToUser();
         }
         else if (itemId == menuClose) closeApplicationWindow();
         else if (itemId == menuUndo) { canvas.undo(); updateStatus(); }
@@ -12872,6 +13318,21 @@ public:
             performanceDiagnosticsVisible = ! performanceDiagnosticsVisible;
             performanceDiagnosticsPanel.setVisible (performanceDiagnosticsVisible);
             resized(); menuItemsChanged();
+        }
+        else if (itemId == menuPerformanceStress)
+        {
+            performanceStressMode = ! performanceStressMode;
+            canvas.setPerformanceStressMode (performanceStressMode);
+            if (performanceStressMode)
+            {
+                performanceDiagnosticsVisible = true;
+                performanceDiagnosticsPanel.setVisible (true);
+                statusLabel.setText ("Performance stress mode active", juce::dontSendNotification);
+            }
+            else
+                statusLabel.setText ("Performance stress mode off", juce::dontSendNotification);
+            resized();
+            menuItemsChanged();
         }
         else if (itemId == menuAudioSettings) openAudioSettings();
         else if (itemId == menuAbout)
@@ -13007,7 +13468,8 @@ private:
 
     enum { menuNewProject = 10001, menuOpenProject, menuSaveProject, menuSaveProjectAs, menuRecordWav, menuClose,
            menuUndo, menuRedo, menuCopy, menuPaste, menuDuplicate, menuSaveAssembly, menuToggleBypass, menuClear, menuRainbowUi, menuMixer, menuClocks,
-           menuDimOrbitElements, menuCompactDiscs, menuFlowDebug, menuAudioDiagnostics, menuPerformanceDiagnostics, menuAudioSettings };
+           menuDimOrbitElements, menuCompactDiscs, menuFlowDebug, menuAudioDiagnostics, menuPerformanceDiagnostics,
+           menuPerformanceStress, menuAudioSettings, menuRevealRecording };
     static constexpr int menuAbout = 10100;
     static constexpr int menuAssemblyBase = 11000;
     juce::PopupMenu applicationMenu;
@@ -13058,14 +13520,28 @@ private:
     juce::TextButton layersModulationButton;
     juce::Label dataPaneTitle;
     juce::Label dataPaneSummary;
+    juce::Component dataPaneContent;
+    juce::Viewport dataPaneViewport;
+    juce::Label playbackSectionLabel;
     juce::Label triggerModeLabel;
     juce::ComboBox triggerModeBox;
     juce::ToggleButton holdDropsToggle;
+    juce::Label mixSectionLabel;
+    juce::Label discLevelLabel, discPanLabel;
     juce::Slider discLevelSlider, discPanSlider;
     juce::TextButton discMuteButton, discSoloButton;
     juce::Label elementModeLabel;
     juce::ComboBox elementModeBox;
     juce::TextEditor elementProbabilityBox;
+    juce::Label elementsSectionLabel;
+    juce::Label contentSectionLabel;
+    InspectorRowBackground nestedWorldRowBackground { worldElementColour() };
+    InspectorRowBackground scCodeRowBackground { scCodeElementColour() };
+    InspectorRowBackground pdPatchRowBackground { pdPatchElementColour() };
+    InspectorRowBackground scSheetRowBackground { scSheetElementColour() };
+    InspectorRowBackground orcaGridRowBackground { orcaGridElementColour() };
+    InspectorRowBackground carouselRowBackground { carouselElementColour() };
+    InspectorRowBackground pipeWorldRowBackground { pipeElementColour() };
     ElementDotButton nestedWorldDot;
     ElementDotButton scCodeDot;
     ElementDotButton pdPatchDot;
@@ -13114,7 +13590,13 @@ private:
     juce::TextButton fireDiscButton;
     juce::TextButton dataPaneCloseButton;
     bool dataPaneOpen = false;
+    std::unique_ptr<juce::Component> contextualInspectorContent;
+    juce::Viewport contextualInspectorViewport;
+    juce::Label contextualInspectorTitle;
+    juce::TextButton contextualInspectorCloseButton;
+    bool contextualInspectorOpen = false;
     bool audioDiagnosticsVisible = false, performanceDiagnosticsVisible = false;
+    bool performanceStressMode = false;
     bool pdAudioInputsMuted = true;
     ScDiscAudioEngine scAudio;
     juce::AudioBuffer<float> scratchAudio;
@@ -13165,6 +13647,9 @@ private:
     std::atomic<int> currentAudioInputChannels { 0 };
     std::atomic<double> recordingStartMs { 0.0 };
     juce::File currentRecordingFile;
+    juce::File recordingTargetFile;
+    juce::File lastRecordingFile;
+    double lastRecordingDurationSeconds = 0.0;
     juce::ScopedMessageBox projectPrompt;
     juce::File currentProjectFile;
     bool projectDirty = false;
@@ -13204,13 +13689,6 @@ private:
     };
 
     ElementDotSignature elementDotSignature;
-    juce::Rectangle<int> nestedWorldRowBounds;
-    juce::Rectangle<int> scCodeRowBounds;
-    juce::Rectangle<int> pdPatchRowBounds;
-    juce::Rectangle<int> scSheetRowBounds;
-    juce::Rectangle<int> orcaGridRowBounds;
-    juce::Rectangle<int> carouselRowBounds;
-    juce::Rectangle<int> pipeWorldRowBounds;
     juce::Rectangle<int> layersPanelBounds;
     juce::Rectangle<int> leftToolPanelBounds;
     juce::Rectangle<int> transportBarBounds;
@@ -13436,6 +13914,64 @@ private:
         updateStatus();
     }
 
+    void showContextualInspector (std::unique_ptr<juce::Component> content)
+    {
+        contextualInspectorViewport.setViewedComponent (nullptr, false);
+        contextualInspectorContent.reset();
+        contextualInspectorContent = std::move (content);
+        if (contextualInspectorContent == nullptr)
+        {
+            closeContextualInspector (false);
+            return;
+        }
+
+        dataPaneOpen = false;
+        selectedElement = {};
+        setPaneComponentsVisible (false);
+        contextualInspectorViewport.setViewedComponent (contextualInspectorContent.get(), false);
+        contextualInspectorOpen = true;
+        resized();
+        repaint();
+    }
+
+    void showSelectionInspector (const juce::String& title, int count)
+    {
+        auto content = std::make_unique<SelectionInspectorComponent> (
+            title, juce::jmax (1, count),
+            [this]
+            {
+                canvas.duplicateSelectedItems();
+                updateStatus();
+            },
+            [this]
+            {
+                const auto safeThis = juce::Component::SafePointer<MainComponent> (this);
+                juce::MessageManager::callAsync ([safeThis]
+                {
+                    if (safeThis == nullptr) return;
+                    safeThis->canvas.keyPressed (juce::KeyPress (juce::KeyPress::backspaceKey));
+                    safeThis->closeContextualInspector();
+                    safeThis->updateStatus();
+                });
+            });
+        showContextualInspector (std::move (content));
+    }
+
+    void closeContextualInspector (bool updateLayout = true)
+    {
+        contextualInspectorViewport.setViewedComponent (nullptr, false);
+        contextualInspectorContent.reset();
+        contextualInspectorOpen = false;
+        contextualInspectorTitle.setVisible (false);
+        contextualInspectorCloseButton.setVisible (false);
+        contextualInspectorViewport.setVisible (false);
+        if (updateLayout)
+        {
+            resized();
+            repaint();
+        }
+    }
+
     juce::Rectangle<int> getDataPaneBounds() const
     {
         return getLocalBounds().withTrimmedTop (toolbarHeight).removeFromRight (dataPaneWidth);
@@ -13452,22 +13988,6 @@ private:
     {
         button.setButtonText (text);
         BlendingsInspector::styleButton (button);
-    }
-
-    static void paintPaneRow (juce::Graphics& g, juce::Rectangle<int> bounds, juce::Colour accent, bool active)
-    {
-        if (bounds.isEmpty())
-            return;
-
-        const auto area = bounds.toFloat().reduced (0.0f, 1.0f);
-        g.setColour (raisedSurface().withAlpha (active ? 0.55f : 0.32f));
-        g.fillRoundedRectangle (area, 7.0f);
-
-        g.setColour (subtleStroke().withAlpha (active ? 0.58f : 0.34f));
-        g.drawRoundedRectangle (area.reduced (0.5f), 7.0f, 1.0f);
-
-        g.setColour (accent.withAlpha (active ? 0.90f : 0.28f));
-        g.fillRoundedRectangle (area.withWidth (3.0f).reduced (0.0f, 8.0f), 1.5f);
     }
 
     static void layoutPaneRow (juce::Rectangle<int> bounds,
@@ -13542,15 +14062,29 @@ private:
         const auto info = canvas.getSelectedDiscInfo();
         dataPaneTitle.setVisible (shouldBeVisible);
         dataPaneSummary.setVisible (shouldBeVisible);
+        dataPaneViewport.setVisible (shouldBeVisible);
+        playbackSectionLabel.setVisible (shouldBeVisible);
         triggerModeLabel.setVisible (shouldBeVisible);
         triggerModeBox.setVisible (shouldBeVisible);
         holdDropsToggle.setVisible (shouldBeVisible);
+        mixSectionLabel.setVisible (shouldBeVisible);
+        discLevelLabel.setVisible (shouldBeVisible);
+        discPanLabel.setVisible (shouldBeVisible);
         discLevelSlider.setVisible (shouldBeVisible); discPanSlider.setVisible (shouldBeVisible);
         discMuteButton.setVisible (shouldBeVisible); discSoloButton.setVisible (shouldBeVisible);
         elementModeLabel.setVisible (shouldBeVisible);
         elementModeBox.setVisible (shouldBeVisible);
+        elementsSectionLabel.setVisible (shouldBeVisible);
+        contentSectionLabel.setVisible (shouldBeVisible);
         elementProbabilityBox.setVisible (shouldBeVisible
                                           && elementModeBox.getSelectedId() - 1 == static_cast<int> (Disc::ElementMode::probability));
+        nestedWorldRowBackground.setVisible (shouldBeVisible);
+        scCodeRowBackground.setVisible (shouldBeVisible);
+        pdPatchRowBackground.setVisible (shouldBeVisible);
+        scSheetRowBackground.setVisible (shouldBeVisible);
+        orcaGridRowBackground.setVisible (shouldBeVisible);
+        carouselRowBackground.setVisible (shouldBeVisible);
+        pipeWorldRowBackground.setVisible (shouldBeVisible);
         nestedWorldDot.setVisible (false);
         scCodeDot.setVisible (false);
         pdPatchDot.setVisible (false);
@@ -13633,6 +14167,13 @@ private:
             discMuteButton.setToggleState (false, juce::dontSendNotification); discSoloButton.setToggleState (false, juce::dontSendNotification);
             elementModeBox.setSelectedId (1, juce::dontSendNotification);
             elementProbabilityBox.setText ("50%", false);
+            nestedWorldRowBackground.setActive (false);
+            scCodeRowBackground.setActive (false);
+            pdPatchRowBackground.setActive (false);
+            scSheetRowBackground.setActive (false);
+            orcaGridRowBackground.setActive (false);
+            carouselRowBackground.setActive (false);
+            pipeWorldRowBackground.setActive (false);
             refreshElementDots();
             return;
         }
@@ -13653,9 +14194,13 @@ private:
         elementModeBox.setSelectedId (info.elementMode + 1, juce::dontSendNotification);
         elementProbabilityBox.setText (juce::String (info.elementProbability * 100.0, 0) + "%", false);
         elementProbabilityBox.setVisible (dataPaneOpen && info.elementMode == static_cast<int> (Disc::ElementMode::probability));
-        dataPaneSummary.setText (juce::String (totalElements) + " elements    "
-                                     + juce::String (info.nestedRouteCount) + " inner pipes    "
-                                     + juce::String (info.nestedDiscCount) + " inner discs",
+        const auto counted = [] (int count, const juce::String& singular)
+        {
+            return juce::String (count) + " " + singular + (count == 1 ? juce::String() : "s");
+        };
+        dataPaneSummary.setText (counted (totalElements, "element") + "  /  "
+                                     + counted (info.nestedRouteCount, "inner pipe") + "  /  "
+                                     + counted (info.nestedDiscCount, "inner disc"),
                                  juce::dontSendNotification);
         worldLabel.setText ("Nested worlds", juce::dontSendNotification);
         worldInfoLabel.setText (info.nestedWorldCount > 0
@@ -13684,6 +14229,13 @@ private:
         carouselInfoLabel.setText (info.hasCarousel ? juce::String (info.carouselCount) + " fields  /  " + juce::String (info.carouselItemCount) + " objects" : "none", juce::dontSendNotification);
         pipeWorldLabel.setText ("Pipe", juce::dontSendNotification);
         pipeWorldInfoLabel.setText (info.hasPipeWorld ? juce::String (info.pipeWorldCount) + " worlds" : "none", juce::dontSendNotification);
+        nestedWorldRowBackground.setActive (info.hasNestedWorld);
+        scCodeRowBackground.setActive (info.hasScCode);
+        pdPatchRowBackground.setActive (info.hasPdPatch);
+        scSheetRowBackground.setActive (info.hasScSheet);
+        orcaGridRowBackground.setActive (info.hasOrcaGrid);
+        carouselRowBackground.setActive (info.hasCarousel);
+        pipeWorldRowBackground.setActive (info.hasPipeWorld);
 
         worldRemoveButton.setEnabled (info.hasNestedWorld);
         worldAddButton.setEnabled (true);
@@ -13754,7 +14306,7 @@ private:
         }
 
         for (auto& dot : elementDots)
-            removeChildComponent (dot.get());
+            dataPaneContent.removeChildComponent (dot.get());
 
         elementDots.clear();
         elementDotSignature = nextSignature;
@@ -13809,7 +14361,7 @@ private:
             dot->setSelected (selectedElement.has_value()
                               && selectedElement->kind == kind
                               && selectedElement->index == i);
-            addAndMakeVisible (*dot);
+            dataPaneContent.addAndMakeVisible (*dot);
             elementDots.push_back (std::move (dot));
         }
     }
@@ -14227,7 +14779,13 @@ private:
         const auto folder = currentProjectFile.existsAsFile()
                               ? currentProjectFile.getParentDirectory()
                               : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
-        const auto name = "Blendings " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S") + ".wav";
+        auto projectName = currentProjectFile.existsAsFile()
+                             ? currentProjectFile.getFileNameWithoutExtension()
+                             : juce::String ("Untitled");
+        projectName = juce::File::createLegalFileName (projectName).trim();
+        if (projectName.isEmpty()) projectName = "Untitled";
+        const auto name = projectName + " Mix "
+                        + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S") + ".wav";
         recordingFileChooser = std::make_unique<juce::FileChooser> ("Record Master Output",
                                                                     folder.getChildFile (name), "*.wav");
         const auto safeThis = juce::Component::SafePointer<MainComponent> (this);
@@ -14257,8 +14815,11 @@ private:
             return;
         }
 
-        file.deleteFile();
-        std::unique_ptr<juce::OutputStream> stream = file.createOutputStream();
+        recordingTargetFile = file.withFileExtension ("wav");
+        currentRecordingFile = recordingTargetFile.getSiblingFile (
+            "." + recordingTargetFile.getFileNameWithoutExtension() + ".recording.wav");
+        currentRecordingFile.deleteFile();
+        std::unique_ptr<juce::OutputStream> stream = currentRecordingFile.createOutputStream();
         if (stream == nullptr)
         {
             statusLabel.setText ("Could not create recording", juce::dontSendNotification);
@@ -14283,16 +14844,56 @@ private:
         activeRecordingWriter = threadedRecordingWriter.get();
         recordingStartMs.store (juce::Time::getMillisecondCounterHiRes());
         recordingActive.store (true);
-        currentRecordingFile = file;
-        statusLabel.setText ("Recording master output", juce::dontSendNotification);
+        statusLabel.setText ("Recording " + recordingTargetFile.getFileName()
+                             + " / " + juce::String (sampleRate / 1000.0, 1) + " kHz / 24-bit",
+                             juce::dontSendNotification);
+        menuItemsChanged();
     }
 
     void stopMasterRecording()
     {
-        const juce::ScopedLock lock (recordingLock);
-        recordingActive.store (false);
-        activeRecordingWriter = nullptr;
-        threadedRecordingWriter.reset();
+        if (! recordingActive.exchange (false))
+            return;
+
+        const auto duration = juce::jmax (0.0, (juce::Time::getMillisecondCounterHiRes()
+                                               - recordingStartMs.load()) / 1000.0);
+        {
+            const juce::ScopedLock lock (recordingLock);
+            activeRecordingWriter = nullptr;
+            threadedRecordingWriter.reset();
+        }
+
+        auto finalised = false;
+        if (currentRecordingFile.existsAsFile() && recordingTargetFile != juce::File())
+        {
+            recordingTargetFile.deleteFile();
+            finalised = currentRecordingFile.moveFileTo (recordingTargetFile);
+            if (! finalised)
+            {
+                finalised = currentRecordingFile.copyFileTo (recordingTargetFile);
+                if (finalised) currentRecordingFile.deleteFile();
+            }
+        }
+
+        if (finalised)
+        {
+            lastRecordingFile = recordingTargetFile;
+            lastRecordingDurationSeconds = duration;
+            const auto totalSeconds = juce::jmax (0, static_cast<int> (std::round (duration)));
+            const auto time = juce::String (totalSeconds / 60).paddedLeft ('0', 2) + ":"
+                            + juce::String (totalSeconds % 60).paddedLeft ('0', 2);
+            statusLabel.setText ("Saved " + lastRecordingFile.getFileName() + " / " + time
+                                 + " / " + juce::String (recordingSampleRate.load() / 1000.0, 1)
+                                 + " kHz / 24-bit", juce::dontSendNotification);
+        }
+        else
+        {
+            statusLabel.setText ("Could not finalise the WAV recording", juce::dontSendNotification);
+        }
+
+        currentRecordingFile = juce::File();
+        recordingTargetFile = juce::File();
+        menuItemsChanged();
     }
 
     bool isMasterRecording() const { return recordingActive.load(); }
@@ -14946,7 +15547,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.2.0"; }
+    const juce::String getApplicationVersion() override    { return "0.7.0"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String&) override
@@ -15051,4 +15652,89 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
 };
 
+#if BLENDINGS_PLAYBACK_SMOKE
+int main (int argc, char** argv)
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    const auto demoFile = argc > 1 ? juce::File (juce::String::fromUTF8 (argv[1])) : juce::File();
+    if (! demoFile.existsAsFile())
+    {
+        std::fprintf (stderr, "Playback smoke: demo project is missing\n");
+        return 1;
+    }
+
+    auto xml = juce::XmlDocument::parse (demoFile);
+    if (xml == nullptr)
+    {
+        std::fprintf (stderr, "Playback smoke: demo project XML is invalid\n");
+        return 2;
+    }
+
+    RoadCanvas canvas;
+    if (! canvas.applyProjectState (juce::ValueTree::fromXml (*xml)))
+    {
+        std::fprintf (stderr, "Playback smoke: demo project could not be loaded\n");
+        return 3;
+    }
+
+    ScDiscAudioEngine audio;
+    constexpr double sampleRate = 44100.0;
+    constexpr int blockSize = 512;
+    audio.prepare (sampleRate, blockSize, 2, 0);
+
+    int triggerCount = 0;
+    canvas.onDiscFlowTriggered = [&] (int discIndex)
+    {
+        DiscAudioTrigger trigger;
+        trigger.soundElementCount = 1;
+        trigger.midiNote = 60 + (discIndex % 12);
+        trigger.gain = 0.65f;
+        audio.trigger (trigger);
+        ++triggerCount;
+    };
+
+    canvas.setFlowTiming (120.0, 1.0);
+    canvas.setPerformanceStressMode (true);
+    canvas.resetFlowToStart();
+    canvas.setFlowRunning (true);
+
+    juce::AudioBuffer<float> block (2, blockSize);
+    float peak = 0.0f;
+    int maximumDrops = 0;
+    for (int step = 0; step < 1800; ++step)
+    {
+        canvas.advanceFlowForTesting (0.05);
+        block.clear();
+        audio.render (block);
+        peak = juce::jmax (peak, block.getMagnitude (0, blockSize));
+        const auto snapshot = canvas.getPerformanceSnapshot();
+        maximumDrops = juce::jmax (maximumDrops, snapshot.drops);
+        if (! std::isfinite (snapshot.flowUpdateMs) || snapshot.drops > 2048)
+        {
+            std::fprintf (stderr, "Playback smoke: unstable flow state\n");
+            return 4;
+        }
+    }
+
+    const auto finalBeat = canvas.flowBeatForTesting();
+    const auto performance = canvas.getPerformanceSnapshot();
+    canvas.resetFlowToStart();
+    const auto resetBeat = canvas.flowBeatForTesting();
+    audio.release();
+
+    if (triggerCount < 2 || peak < 0.0001f || finalBeat < 32.0 || resetBeat > 0.001
+        || ! performance.stressMode || performance.stressWorkUnits == 0)
+    {
+        std::fprintf (stderr,
+                      "Playback smoke failed: triggers=%d peak=%.5f beat=%.2f reset=%.3f probes=%zu\n",
+                      triggerCount, peak, finalBeat, resetBeat, performance.stressWorkUnits);
+        return 5;
+    }
+
+    std::printf ("Playback smoke passed: %d disc triggers, peak %.3f, %.1f beats, %d max drops, %zu shadow probes\n",
+                 triggerCount, peak, finalBeat, maximumDrops, performance.stressWorkUnits);
+    return 0;
+}
+#else
 START_JUCE_APPLICATION (BlendingsApplication)
+#endif
