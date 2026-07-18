@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.7.3 LANGUAGES C CXX)
+project(Blendings VERSION 0.7.4 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -149,7 +149,13 @@ add_custom_command(TARGET Blendings POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:Blendings>/../Resources"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/PdPatchEditor.html"
-        "$<TARGET_FILE_DIR:Blendings>/../Resources/PdPatchEditor.html")
+        "$<TARGET_FILE_DIR:Blendings>/../Resources/PdPatchEditor.html"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+        "$<TARGET_FILE_DIR:Blendings>/../Resources/LICENSE"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+        "$<TARGET_FILE_DIR:Blendings>/../Resources/THIRD_PARTY_NOTICES.md")
 
 # JUCE applies an ad-hoc linker signature before post-build resources are copied.
 # Reseal the complete bundle so local and release-candidate app bundles verify.

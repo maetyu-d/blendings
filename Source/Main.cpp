@@ -12107,13 +12107,320 @@ private:
     std::function<void(bool)> onMuteChanged;
 };
 
+class RecentProjectButton final : public juce::Button
+{
+public:
+    RecentProjectButton (juce::File projectFile, bool hasRecoveryCopy)
+        : juce::Button (projectFile.getFileNameWithoutExtension()), file (std::move (projectFile)), recovery (hasRecoveryCopy)
+    {
+        setTooltip (file.getFullPathName());
+        setTitle (file.getFileNameWithoutExtension());
+    }
+
+    void paintButton (juce::Graphics& g, bool hovered, bool down) override
+    {
+        auto area = getLocalBounds().toFloat();
+        if (hovered || down)
+        {
+            g.setColour ((down ? accentColour() : raisedSurface()).withAlpha (down ? 0.22f : 0.92f));
+            g.fillRoundedRectangle (area, 7.0f);
+        }
+
+        auto icon = getLocalBounds().removeFromLeft (50).withSizeKeepingCentre (28, 28).toFloat();
+        g.setColour (accentColour().withAlpha (hovered ? 0.22f : 0.13f));
+        g.fillRoundedRectangle (icon, 6.0f);
+        g.setColour (accentColour().withAlpha (0.92f));
+        g.drawRoundedRectangle (icon.reduced (0.5f), 6.0f, 1.0f);
+        auto page = icon.reduced (7.0f, 5.0f);
+        g.drawRoundedRectangle (page, 1.5f, 1.4f);
+        g.drawLine (page.getX() + 3.0f, page.getY() + 5.0f, page.getRight() - 3.0f, page.getY() + 5.0f, 1.2f);
+        g.drawLine (page.getX() + 3.0f, page.getY() + 9.0f, page.getRight() - 5.0f, page.getY() + 9.0f, 1.2f);
+
+        auto textArea = getLocalBounds().reduced (50, 0);
+        textArea.removeFromRight (112);
+        g.setColour (textPrimary());
+        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.drawText (file.getFileNameWithoutExtension(), textArea.removeFromTop (27), juce::Justification::centredLeft, true);
+        g.setColour (textMuted());
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText (file.getParentDirectory().getFileName(), textArea, juce::Justification::centredLeft, true);
+
+        if (recovery)
+        {
+            auto badge = getLocalBounds().removeFromRight (112).reduced (0, 17).toFloat();
+            g.setColour (juce::Colour (0xffffb84d).withAlpha (0.14f));
+            g.fillRoundedRectangle (badge, 5.0f);
+            g.setColour (juce::Colour (0xffffc766));
+            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            g.drawText ("RECOVERY", badge, juce::Justification::centred);
+        }
+        else
+        {
+            auto detail = getLocalBounds().removeFromRight (76);
+            g.setColour (textMuted().withAlpha (0.8f));
+            g.setFont (juce::FontOptions (11.5f));
+            g.drawText (file.getLastModificationTime().formatted ("%d %b"), detail, juce::Justification::centredLeft, false);
+        }
+
+        const auto cx = static_cast<float> (getWidth() - 17);
+        const auto cy = static_cast<float> (getHeight()) * 0.5f;
+        g.setColour (textMuted().withAlpha (hovered ? 0.9f : 0.5f));
+        g.drawLine (cx - 3.0f, cy - 4.0f, cx + 1.0f, cy, 1.5f);
+        g.drawLine (cx + 1.0f, cy, cx - 3.0f, cy + 4.0f, 1.5f);
+    }
+
+private:
+    juce::File file;
+    bool recovery = false;
+};
+
+class StartupChooser final : public juce::Component
+{
+public:
+    std::function<void()> onNewProject;
+    std::function<void()> onOpenProject;
+    std::function<void(const juce::File&)> onOpenRecent;
+    std::function<void(bool)> onShowAtLaunchChanged;
+
+    StartupChooser()
+    {
+        setOpaque (true);
+        title.setText ("Blendings", juce::dontSendNotification);
+        title.setFont (juce::FontOptions (38.0f, juce::Font::bold));
+        title.setColour (juce::Label::textColourId, textPrimary());
+        subtitle.setText ("Combine SuperCollider, Purr Data (Pd),\nOrca, and more, in a single spatial music\nenvironment.",
+                          juce::dontSendNotification);
+        subtitle.setColour (juce::Label::textColourId, textMuted());
+        creator.setText ("created by matd.space", juce::dontSendNotification);
+        creator.setFont (juce::FontOptions (11.5f));
+        creator.setColour (juce::Label::textColourId, textMuted().withAlpha (0.9f));
+        recentTitle.setText ("Recent", juce::dontSendNotification);
+        recentTitle.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        recentTitle.setColour (juce::Label::textColourId, textPrimary());
+        emptyRecent.setText ("No recent projects yet", juce::dontSendNotification);
+        emptyRecent.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        emptyRecent.setJustificationType (juce::Justification::centred);
+        emptyRecent.setColour (juce::Label::textColourId, textMuted());
+        emptyDetail.setText ("Projects you open will appear here.", juce::dontSendNotification);
+        emptyDetail.setJustificationType (juce::Justification::centred);
+        emptyDetail.setColour (juce::Label::textColourId, textMuted().withAlpha (0.68f));
+        recoveryStatus.setColour (juce::Label::textColourId, juce::Colour (0xffffb84d));
+        recoveryStatus.setJustificationType (juce::Justification::centredLeft);
+
+        newButton.setButtonText ("New Project");
+        openButton.setButtonText ("Open Project...");
+        newButton.setColour (juce::TextButton::buttonColourId, accentColour());
+        newButton.setColour (juce::TextButton::buttonOnColourId, accentColour().brighter (0.08f));
+        newButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        openButton.setColour (juce::TextButton::buttonColourId, raisedSurface());
+        openButton.setColour (juce::TextButton::buttonOnColourId, raisedSurface().brighter (0.08f));
+        newButton.onClick = [this] { if (onNewProject) onNewProject(); };
+        openButton.onClick = [this] { if (onOpenProject) onOpenProject(); };
+        showAtLaunch.setButtonText ("Show at launch");
+        showAtLaunch.setColour (juce::ToggleButton::textColourId, textMuted());
+        showAtLaunch.onClick = [this]
+        {
+            if (onShowAtLaunchChanged) onShowAtLaunchChanged (showAtLaunch.getToggleState());
+        };
+
+        for (auto* component : std::array<juce::Component*, 10> { &title, &subtitle, &creator, &recentTitle, &emptyRecent,
+                                                                  &emptyDetail, &recoveryStatus, &newButton, &openButton, &showAtLaunch })
+            addAndMakeVisible (component);
+    }
+
+    void setShowAtLaunch (bool shouldShow)
+    {
+        showAtLaunch.setToggleState (shouldShow, juce::dontSendNotification);
+    }
+
+    void setRecentProjects (const juce::Array<juce::File>& files)
+    {
+        recentButtons.clear();
+        recentFiles = files;
+        juce::StringArray recoveries;
+        for (const auto& file : recentFiles)
+        {
+            const auto backup = recoveryFileFor (file);
+            auto button = std::make_unique<RecentProjectButton> (file, backup.existsAsFile());
+            const auto recentFile = file;
+            button->onClick = [this, recentFile] { if (onOpenRecent) onOpenRecent (recentFile); };
+            addAndMakeVisible (*button);
+            recentButtons.push_back (std::move (button));
+
+            if (backup.existsAsFile())
+                recoveries.add (file.getFileNameWithoutExtension());
+        }
+        emptyRecent.setVisible (recentButtons.empty());
+        emptyDetail.setVisible (recentButtons.empty());
+        recoveryStatus.setText (recoveries.isEmpty() ? juce::String()
+                                                     : "Recovery copy available: " + recoveries.joinIntoString (", "),
+                                juce::dontSendNotification);
+        resized();
+        repaint();
+    }
+
+    static juce::File recoveryFileFor (const juce::File& file)
+    {
+        return file.getSiblingFile (file.getFileNameWithoutExtension() + "-recovery-backup.otherware");
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (appBackground());
+
+        g.setColour (subtleStroke().withAlpha (0.12f));
+        for (int x = 0; x < getWidth(); x += 48)
+            g.drawVerticalLine (x, 0.0f, static_cast<float> (getHeight()));
+        for (int y = 0; y < getHeight(); y += 48)
+            g.drawHorizontalLine (y, 0.0f, static_cast<float> (getWidth()));
+
+        drawIdentity (g, identityBounds);
+
+        const auto card = projectPanelBounds.toFloat();
+        g.setColour (juce::Colours::black.withAlpha (0.16f));
+        g.fillRoundedRectangle (card.translated (0.0f, 8.0f), 8.0f);
+        g.setColour (surfaceColour());
+        g.fillRoundedRectangle (card, 8.0f);
+        g.setColour (subtleStroke().withAlpha (0.76f));
+        g.drawRoundedRectangle (card.reduced (0.5f), 8.0f, 1.0f);
+
+        if (recentButtons.empty())
+            drawEmptyState (g, emptyVisualBounds);
+
+        if (! showAtLaunch.getBounds().isEmpty())
+        {
+            g.setColour (subtleStroke().withAlpha (0.45f));
+            const auto y = static_cast<float> (showAtLaunch.getY() - 14);
+            g.drawHorizontalLine (static_cast<int> (y), card.getX() + 30.0f, card.getRight() - 30.0f);
+        }
+    }
+
+    void resized() override
+    {
+        auto content = contentBounds();
+        const auto compact = content.getWidth() < 820;
+        if (compact)
+        {
+            identityBounds = content.removeFromTop (128);
+            projectPanelBounds = content;
+        }
+        else
+        {
+            identityBounds = content.removeFromLeft (350);
+            content.removeFromLeft (44);
+            projectPanelBounds = content;
+        }
+
+        auto identity = identityBounds.reduced (8, compact ? 0 : 28);
+        title.setBounds (identity.removeFromTop (52));
+        subtitle.setBounds (identity.removeFromTop (48));
+        creator.setBounds (identityBounds.reduced (8, 20).removeFromBottom (24));
+        creator.setVisible (! compact);
+
+        auto area = projectPanelBounds.reduced (30, 26);
+        auto actions = area.removeFromTop (48);
+        newButton.setBounds (actions.removeFromLeft (160));
+        actions.removeFromLeft (8);
+        openButton.setBounds (actions.removeFromLeft (160));
+        area.removeFromTop (30);
+        recentTitle.setBounds (area.removeFromTop (24));
+        area.removeFromTop (6);
+        if (emptyRecent.isVisible())
+        {
+            auto empty = area.removeFromTop (170);
+            emptyVisualBounds = empty.removeFromTop (82);
+            emptyRecent.setBounds (empty.removeFromTop (34));
+            emptyDetail.setBounds (empty.removeFromTop (28));
+        }
+        else
+            emptyVisualBounds = {};
+        for (auto& button : recentButtons)
+        {
+            button->setBounds (area.removeFromTop (54));
+            area.removeFromTop (3);
+        }
+        recoveryStatus.setBounds (area.removeFromTop (30));
+        showAtLaunch.setBounds (projectPanelBounds.reduced (30, 20).removeFromBottom (28));
+    }
+
+private:
+    juce::Rectangle<int> contentBounds() const
+    {
+        const auto width = juce::jmin (980, getWidth() - 48);
+        const auto desiredHeight = recentButtons.empty() ? 440
+                                                         : juce::jmin (610, 266 + static_cast<int> (recentButtons.size()) * 57);
+        const auto height = juce::jmin (desiredHeight, getHeight() - 48);
+        return { (getWidth() - width) / 2, (getHeight() - height) / 2, width, height };
+    }
+
+    static void drawDisc (juce::Graphics& g, juce::Point<float> centre, juce::Colour colour, float radius)
+    {
+        g.setColour (colour.withAlpha (0.16f));
+        g.fillEllipse (juce::Rectangle<float> (radius * 3.0f, radius * 3.0f).withCentre (centre));
+        g.setColour (colour.withAlpha (0.92f));
+        g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre), 2.0f);
+        g.setColour (colour.brighter (0.3f));
+        g.fillEllipse (juce::Rectangle<float> (radius * 1.15f, radius * 1.15f).withCentre (centre));
+    }
+
+    static void drawIdentity (juce::Graphics& g, juce::Rectangle<int> bounds)
+    {
+        if (bounds.getWidth() < 250 || bounds.getHeight() < 260)
+            return;
+        const auto x = static_cast<float> (bounds.getX() + 26);
+        const auto y = static_cast<float> (bounds.getCentreY() + 26);
+        const std::array<juce::Point<float>, 5> points { juce::Point<float> (x, y - 74.0f),
+                                                        { x + 88.0f, y - 74.0f },
+                                                        { x + 88.0f, y + 4.0f },
+                                                        { x + 190.0f, y + 4.0f },
+                                                        { x + 190.0f, y + 76.0f } };
+        const std::array<juce::Colour, 4> colours { juce::Colour (0xff28d7c0), juce::Colour (0xff35a7ff),
+                                                    juce::Colour (0xffff5f8f), juce::Colour (0xffffbd4a) };
+        for (size_t i = 0; i + 1 < points.size(); ++i)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.42f));
+            g.drawLine ({ points[i], points[i + 1] }, 10.0f);
+            g.setColour (colours[i]);
+            g.drawLine ({ points[i], points[i + 1] }, 4.0f);
+        }
+        drawDisc (g, points.front(), colours[0], 10.0f);
+        drawDisc (g, points[2], colours[2], 12.0f);
+        drawDisc (g, points.back(), colours[3], 10.0f);
+        g.setColour (colours[1].withAlpha (0.28f));
+        g.drawEllipse (juce::Rectangle<float> (76.0f, 76.0f).withCentre (points[2]), 1.0f);
+    }
+
+    static void drawEmptyState (juce::Graphics& g, juce::Rectangle<int> bounds)
+    {
+        if (bounds.isEmpty())
+            return;
+        const auto centre = bounds.getCentre().toFloat().translated (0.0f, 5.0f);
+        g.setColour (accentColour().withAlpha (0.08f));
+        g.fillEllipse (juce::Rectangle<float> (58.0f, 58.0f).withCentre (centre));
+        g.setColour (accentColour().withAlpha (0.28f));
+        g.drawEllipse (juce::Rectangle<float> (44.0f, 44.0f).withCentre (centre), 1.0f);
+        g.setColour (accentColour().withAlpha (0.82f));
+        g.drawEllipse (juce::Rectangle<float> (13.0f, 13.0f).withCentre (centre), 2.0f);
+        const auto satellite = centre.translated (20.0f, -10.0f);
+        g.setColour (juce::Colour (0xffff5f8f).withAlpha (0.86f));
+        g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (satellite));
+    }
+
+    juce::Label title, subtitle, creator, recentTitle, emptyRecent, emptyDetail, recoveryStatus;
+    juce::TextButton newButton, openButton;
+    juce::ToggleButton showAtLaunch;
+    juce::Array<juce::File> recentFiles;
+    std::vector<std::unique_ptr<RecentProjectButton>> recentButtons;
+    juce::Rectangle<int> identityBounds, projectPanelBounds, emptyVisualBounds;
+};
+
 class MainComponent final : public juce::AudioAppComponent,
                             private juce::MidiInputCallback,
                             private juce::Timer,
                             public juce::MenuBarModel
 {
 public:
-    MainComponent()
+    explicit MainComponent (juce::String launchArgument = {})
         : selectButton (IconButton::Icon::select, "Select"),
           drawButton (IconButton::Icon::draw, "Lay pipe"),
           warpPipeButton (IconButton::Icon::warpPipe, "Lay warp pipe"),
@@ -12844,10 +13151,13 @@ public:
 
 #if JUCE_MAC
         applicationMenu.addItem (menuAbout, "About Blendings");
+        applicationMenu.addSeparator();
+        applicationMenu.addItem (menuAudioSettings, "Audio Settings...");
         juce::MenuBarModel::setMacMainMenu (this, &applicationMenu);
 #endif
         applyUiTheme (false);
         updateProjectPresentation();
+        initialiseStartupChooser (std::move (launchArgument));
     }
 
     ~MainComponent() override
@@ -13242,6 +13552,11 @@ public:
         contextualInspectorCloseButton.setVisible (contextualInspectorOpen);
         contextualInspectorViewport.setVisible (contextualInspectorOpen);
         canvas.setBounds (bounds);
+        if (startupChooser != nullptr)
+        {
+            startupChooser->setBounds (getLocalBounds());
+            startupChooser->toFront (false);
+        }
     }
 
     bool keyPressed (const juce::KeyPress& key) override
@@ -13326,7 +13641,6 @@ public:
             menu.addItem (menuAudioDiagnostics, "Audio Diagnostics", true, audioDiagnosticsVisible);
             menu.addItem (menuPerformanceDiagnostics, "Performance Diagnostics", true, performanceDiagnosticsVisible);
             menu.addItem (menuPerformanceStress, "Performance Stress Mode", true, performanceStressMode);
-            menu.addItem (menuAudioSettings, "Audio Settings...");
         }
         return menu;
     }
@@ -13427,7 +13741,10 @@ public:
                     .withIconType (juce::MessageBoxIconType::InfoIcon)
                     .withTitle ("About Blendings")
                     .withMessage ("Blendings\n\nCreated by matd.space\n\nVersion "
-                                  + juce::JUCEApplication::getInstance()->getApplicationVersion())
+                                  + juce::JUCEApplication::getInstance()->getApplicationVersion()
+                                  + "\n\nLicensed under GNU GPL v3.\n"
+                                    "This program comes with absolutely no warranty.\n"
+                                    "See LICENSE and THIRD_PARTY_NOTICES.md for terms and attributions.")
                     .withButton ("OK"),
                 nullptr);
         }
@@ -13436,6 +13753,14 @@ public:
     void requestApplicationClose (std::function<void()> closeAction)
     {
         confirmDiscardChanges (std::move (closeAction));
+    }
+
+    void openProjectFromLaunchArgument (juce::String argument)
+    {
+        argument = argument.trim().unquoted();
+        const juce::File file (argument);
+        if (file.existsAsFile() && file.hasFileExtension ("otherware"))
+            confirmDiscardChanges ([this, file] { loadProjectFile (file); });
     }
 
 private:
@@ -13720,6 +14045,8 @@ private:
     };
     std::vector<PendingElementChain> pendingElementChains;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
+    std::unique_ptr<juce::PropertiesFile> startupSettings;
+    std::unique_ptr<StartupChooser> startupChooser;
     std::unique_ptr<juce::FileChooser> recordingFileChooser;
     juce::TimeSliceThread recordingThread { "Master WAV recorder" };
     juce::CriticalSection recordingLock;
@@ -13788,6 +14115,95 @@ private:
     double lastTransportTimeMs = 0.0;
     struct PendingDiscTrigger { int discIndex = -1; double dueBeat = 0.0; };
     std::vector<PendingDiscTrigger> pendingDiscTriggers;
+
+    juce::Array<juce::File> recentProjectFiles()
+    {
+        juce::Array<juce::File> files;
+        if (startupSettings == nullptr)
+            return files;
+        auto paths = juce::StringArray::fromLines (startupSettings->getValue ("recentProjects"));
+        for (const auto& path : paths)
+        {
+            const juce::File file (path);
+            if (file.existsAsFile() && file.hasFileExtension ("otherware"))
+                files.addIfNotAlreadyThere (file);
+            if (files.size() == 6)
+                break;
+        }
+        return files;
+    }
+
+    void rememberRecentProject (const juce::File& file)
+    {
+        if (startupSettings == nullptr || file == juce::File())
+            return;
+        auto files = recentProjectFiles();
+        files.removeAllInstancesOf (file);
+        files.insert (0, file);
+        while (files.size() > 6)
+            files.removeLast();
+        juce::StringArray paths;
+        for (const auto& recent : files)
+            paths.add (recent.getFullPathName());
+        startupSettings->setValue ("recentProjects", paths.joinIntoString ("\n"));
+        startupSettings->saveIfNeeded();
+        if (startupChooser != nullptr)
+            startupChooser->setRecentProjects (files);
+    }
+
+    void hideStartupChooser()
+    {
+        if (startupChooser != nullptr)
+            startupChooser->setVisible (false);
+        grabKeyboardFocus();
+    }
+
+    void initialiseStartupChooser (juce::String launchArgument)
+    {
+        juce::PropertiesFile::Options options;
+        options.applicationName = "Blendings";
+        options.filenameSuffix = "settings";
+        options.folderName = "matd.space/Blendings";
+        options.osxLibrarySubFolder = "Application Support";
+        startupSettings = std::make_unique<juce::PropertiesFile> (options);
+
+        startupChooser = std::make_unique<StartupChooser>();
+        startupChooser->setShowAtLaunch (startupSettings->getBoolValue ("showStartupChooser", true));
+        startupChooser->setRecentProjects (recentProjectFiles());
+        startupChooser->onShowAtLaunchChanged = [this] (bool enabled)
+        {
+            startupSettings->setValue ("showStartupChooser", enabled);
+            startupSettings->saveIfNeeded();
+        };
+        startupChooser->onNewProject = [this]
+        {
+            hideStartupChooser();
+            newProject();
+        };
+        startupChooser->onOpenProject = [this] { openProject(); };
+        startupChooser->onOpenRecent = [this] (const juce::File& file)
+        {
+            confirmDiscardChanges ([this, file] { loadProjectFile (file); });
+        };
+        addAndMakeVisible (*startupChooser);
+
+        launchArgument = launchArgument.trim().unquoted();
+        const juce::File launchedFile (launchArgument);
+        if (launchedFile.existsAsFile() && launchedFile.hasFileExtension ("otherware"))
+        {
+            startupChooser->setVisible (false);
+            juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer<MainComponent> (this), launchedFile]
+            {
+                if (safeThis != nullptr)
+                    safeThis->loadProjectFile (launchedFile);
+            });
+        }
+        else
+        {
+            startupChooser->setVisible (startupSettings->getBoolValue ("showStartupChooser", true));
+        }
+        resized();
+    }
 
     void setTool (RoadCanvas::Tool tool)
     {
@@ -15496,6 +15912,54 @@ private:
                                                 .withTitle ("Project Error").withMessage (message).withButton ("OK"), nullptr);
     }
 
+    bool loadProjectFile (const juce::File& file)
+    {
+        if (! file.existsAsFile())
+        {
+            showProjectError ("The selected project could not be found.");
+            return false;
+        }
+
+        const auto xml = juce::XmlDocument::parse (file);
+        const auto state = xml != nullptr ? juce::ValueTree::fromXml (*xml) : juce::ValueTree();
+        const auto backup = StartupChooser::recoveryFileFor (file);
+        file.copyFileTo (backup);
+        juce::StringArray recovery;
+        const juce::ScopedValueSetter<bool> suppress (suppressProjectDirty, true);
+        if (! canvas.applyProjectState (state, &recovery))
+        {
+            backup.deleteFile();
+            showProjectError ("This is not a valid Blendings project.");
+            return false;
+        }
+
+        resetTransport();
+        applyGlobalTiming (state);
+        closeElementWindows();
+        currentProjectFile = file;
+        projectDirty = false;
+        dataPaneOpen = false;
+        selectedElement = {};
+        refreshDataPane();
+        resized();
+        updateStatus();
+        updateProjectPresentation();
+        rememberRecentProject (file);
+        hideStartupChooser();
+
+        if (recovery.isEmpty())
+            backup.deleteFile();
+        else
+            juce::NativeMessageBox::showAsync (
+                juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
+                    .withTitle ("Project Recovered")
+                    .withMessage ("Blendings opened the healthy parts of this project.\n\n"
+                                  + recovery.joinIntoString ("\n")
+                                  + "\n\nThe original was preserved as:\n" + backup.getFileName())
+                    .withButton ("OK"), nullptr);
+        return true;
+    }
+
     bool writeProjectToFile (const juce::File& file)
     {
         auto project = canvas.createProjectState();
@@ -15518,6 +15982,7 @@ private:
             || ! temporary.overwriteTargetFileWithTemporary())
             return false;
         currentProjectFile = file; projectDirty = false; updateProjectPresentation();
+        rememberRecentProject (file);
         statusLabel.setText ("Saved " + file.getFileName(), juce::dontSendNotification);
         return true;
     }
@@ -15594,34 +16059,7 @@ private:
             {
                 if (safeThis == nullptr) return;
                 const auto file = chooser.getResult();
-                if (file != juce::File())
-                {
-                    const auto xml = juce::XmlDocument::parse (file);
-                    const auto state = xml != nullptr ? juce::ValueTree::fromXml (*xml) : juce::ValueTree();
-                    const juce::ScopedValueSetter<bool> suppress (safeThis->suppressProjectDirty, true);
-                    juce::StringArray recovery;
-                    const auto backup = file.getSiblingFile (file.getFileNameWithoutExtension() + "-recovery-backup.otherware");
-                    file.copyFileTo (backup);
-                    if (safeThis->canvas.applyProjectState (state, &recovery))
-                    {
-                        safeThis->resetTransport();
-                        safeThis->applyGlobalTiming (state);
-                        safeThis->closeElementWindows();
-                        safeThis->currentProjectFile = file; safeThis->projectDirty = false; safeThis->dataPaneOpen = false; safeThis->selectedElement = {};
-                        safeThis->refreshDataPane(); safeThis->resized(); safeThis->updateStatus(); safeThis->updateProjectPresentation();
-                        if (recovery.isEmpty())
-                            backup.deleteFile();
-                        else
-                            juce::NativeMessageBox::showAsync (
-                                juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::WarningIcon)
-                                    .withTitle ("Project Recovered")
-                                    .withMessage ("Blendings opened the healthy parts of this project.\n\n"
-                                                  + recovery.joinIntoString ("\n")
-                                                  + "\n\nThe original was preserved as:\n" + backup.getFileName())
-                                    .withButton ("OK"), nullptr);
-                    }
-                    else { backup.deleteFile(); safeThis->showProjectError ("This is not a valid Blendings project."); }
-                }
+                if (file != juce::File()) safeThis->loadProjectFile (file);
                 safeThis->projectFileChooser = nullptr;
             });
         });
@@ -15635,9 +16073,9 @@ public:
     const juce::String getApplicationVersion() override    { return "0.7.3"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
-        mainWindow = std::make_unique<MainWindow> (getApplicationName());
+        mainWindow = std::make_unique<MainWindow> (getApplicationName(), commandLine);
     }
 
     void shutdown() override
@@ -15653,19 +16091,23 @@ public:
             quit();
     }
 
-    void anotherInstanceStarted (const juce::String&) override {}
+    void anotherInstanceStarted (const juce::String& commandLine) override
+    {
+        if (mainWindow != nullptr)
+            mainWindow->openProjectFromLaunchArgument (commandLine);
+    }
 
 private:
     class MainWindow final : public juce::DocumentWindow
     {
     public:
-        explicit MainWindow (juce::String name)
+        MainWindow (juce::String name, const juce::String& launchArgument)
             : DocumentWindow (std::move (name),
                               juce::Colour (0xff101614),
                               DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
-            setContentOwned (new MainComponent(), true);
+            setContentOwned (new MainComponent (launchArgument), true);
 #if JUCE_MAC
             setName ({});
 #endif
@@ -15693,6 +16135,13 @@ private:
 
             if (auto* application = juce::JUCEApplication::getInstance())
                 application->quit();
+        }
+
+        void openProjectFromLaunchArgument (const juce::String& argument)
+        {
+            if (auto* mainComponent = dynamic_cast<MainComponent*> (getContentComponent()))
+                mainComponent->openProjectFromLaunchArgument (argument);
+            toFront (true);
         }
 
     private:

@@ -45,3 +45,14 @@ cmake --build build --target SCAudioSmoke --config Release
 The smoke test prepares the embedded SuperCollider engine, triggers disc-style events, renders audio, and prints peak/RMS levels.
 
 Carousel and Pipe workspace checks are available as the `CarouselSmoke` and `PipeWorkspaceSmoke` build targets. The Pd editor round-trip regression suite is in `scripts/pd_editor_roundtrip_test.js`.
+
+## License
+
+Blendings is distributed as a combined work under the GNU General Public
+License, version 3. See [LICENSE](LICENSE) for the complete terms.
+
+Blendings includes or interoperates with third-party free-software components.
+The original Orca MIT copyright and license notice is retained in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), alongside the applicable
+SuperCollider and Purr Data/Pure Data licensing details. Release app bundles
+include both documents in their Resources directory.
