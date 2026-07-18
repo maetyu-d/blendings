@@ -61,13 +61,14 @@ MusicalObjectEditorComponent::MusicalObjectEditorComponent (MusicalObjectSound i
     sourceEditor.setColour (juce::TextEditor::focusedOutlineColourId, accent);
     addAndMakeVisible (sourceEditor);
 
-    for (auto* button : { &resetButton, &previewButton })
+    for (auto* button : { &openEditorButton, &resetButton, &previewButton })
     {
         button->setColour (juce::TextButton::buttonColourId, raised);
         button->setColour (juce::TextButton::textColourOffId, ink);
         addAndMakeVisible (*button);
     }
     previewButton.setColour (juce::TextButton::buttonColourId, accent);
+    openEditorButton.setTooltip ("Open the full sound editor");
 
     playbackBox.onChange = [this]
     {
@@ -95,6 +96,7 @@ MusicalObjectEditorComponent::MusicalObjectEditorComponent (MusicalObjectSound i
         changed();
     };
     previewButton.onClick = [this] { if (onPreview) onPreview (state); };
+    openEditorButton.onClick = [this] { if (onOpenEditor) onOpenEditor (state); };
 
     refresh();
 }
@@ -112,7 +114,10 @@ void MusicalObjectEditorComponent::resized()
     titleLabel.setBounds (area.removeFromTop (32));
     area.removeFromTop (18);
     playbackLabel.setBounds (area.removeFromTop (18));
-    playbackBox.setBounds (area.removeFromTop (34));
+    auto playbackRow = area.removeFromTop (34);
+    openEditorButton.setBounds (playbackRow.removeFromRight (112));
+    playbackRow.removeFromRight (8);
+    playbackBox.setBounds (playbackRow);
     area.removeFromTop (10);
     pitchLabel.setBounds (area.removeFromTop (18));
     pitchSlider.setBounds (area.removeFromTop (34));
@@ -139,6 +144,9 @@ void MusicalObjectEditorComponent::refresh()
     sourceLabel.setVisible (hasSource);
     sourceEditor.setVisible (hasSource);
     resetButton.setVisible (hasSource);
+    openEditorButton.setVisible (hasSource);
+    openEditorButton.setButtonText (state.playback == MusicalObjectSound::Playback::superCollider
+                                      ? "Open SC" : "Open Pd");
     sourceEditor.setText (state.playback == MusicalObjectSound::Playback::superCollider ? state.scSource : state.pdSource, false);
     updating = false;
 }

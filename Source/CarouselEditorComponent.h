@@ -31,6 +31,7 @@ struct CarouselDocument
     int columns = 12, rows = 8, nextId = 20;
     double bpm = 92.0;
     std::vector<Item> items;
+    juce::String recoveryNotice;
 
     static CarouselDocument createDefault();
     juce::ValueTree toValueTree() const;
@@ -65,6 +66,7 @@ public:
     bool keyPressed (const juce::KeyPress&) override;
     bool openFullSoundEditor (int toneId);
     bool runPerformanceSmokeChecks (juce::String& failureMessage);
+    bool runAttachmentSmokeChecks (juce::String& failureMessage);
     bool undo();
     bool redo();
 

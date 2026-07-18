@@ -22,6 +22,7 @@ public:
 
     std::function<void(const MusicalObjectSound&)> onChange;
     std::function<void(const MusicalObjectSound&)> onPreview;
+    std::function<void(const MusicalObjectSound&)> onOpenEditor;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -37,6 +38,7 @@ private:
     juce::ComboBox playbackBox;
     juce::Slider pitchSlider, durationSlider;
     juce::TextEditor sourceEditor;
+    juce::TextButton openEditorButton { "Open editor" };
     juce::TextButton resetButton { "Reset template" };
     juce::TextButton previewButton { "Audition" };
 

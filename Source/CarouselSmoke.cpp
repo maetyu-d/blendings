@@ -31,7 +31,16 @@ int main()
     mountedTone.scCode = "Out.ar(out, Pulse.ar(pitch.midicps) * 0.08);";
     source.items.push_back (mountedTone);
     const auto restored = CarouselDocument::fromValueTree (source.toValueTree());
-    if (restored.columns != 19 || restored.rows != 11 || std::abs (restored.bpm - 137.0) > 0.001
+    auto damagedTree = source.toValueTree();
+    damagedTree.getChild (1).setProperty ("owner", 99999, nullptr);
+    const auto recovered = CarouselDocument::fromValueTree (damagedTree);
+    if (recovered.items[1].ownerOrbit != -1 || ! recovered.recoveryNotice.containsIgnoreCase ("Recovered"))
+    {
+        std::cerr << "Carousel did not recover an invalid parent attachment\n";
+        return 1;
+    }
+    if (source.items[1].ownerOrbit != source.items.front().id
+        || restored.columns != 19 || restored.rows != 11 || std::abs (restored.bpm - 137.0) > 0.001
         || restored.items.size() != source.items.size() || std::abs (restored.items.front().radius - 2.25f) > 0.001f
         || std::abs (restored.items.front().speed + 0.5f) > 0.001f || ! restored.items.front().euclidean
         || restored.items[1].playback != CarouselDocument::PlaybackType::superCollider
@@ -52,6 +61,47 @@ int main()
         || restored.items.back().scCode != mountedTone.scCode)
     {
         std::cerr << "Carousel document round-trip failed\n";
+        return 1;
+    }
+
+    MusicalObjectEditorComponent soundChooser (MusicalObjectSound {});
+    auto* playbackChoice = [&]() -> juce::ComboBox*
+    {
+        for (auto* child : soundChooser.getChildren())
+            if (auto* combo = dynamic_cast<juce::ComboBox*> (child)) return combo;
+        return nullptr;
+    }();
+    auto editorRequest = MusicalObjectSound::Playback::synth;
+    soundChooser.onOpenEditor = [&editorRequest] (const MusicalObjectSound& sound)
+    {
+        editorRequest = sound.playback;
+    };
+    const auto clickEditorButton = [&soundChooser] (const juce::String& caption)
+    {
+        for (auto* child : soundChooser.getChildren())
+            if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr
+                && button->getButtonText() == caption && button->isVisible())
+            {
+                if (button->onClick) button->onClick();
+                return true;
+            }
+        return false;
+    };
+    if (playbackChoice == nullptr)
+    {
+        std::cerr << "Carousel sound chooser has no playback selector\n";
+        return 1;
+    }
+    playbackChoice->setSelectedItemIndex (1, juce::sendNotificationSync);
+    if (! clickEditorButton ("Open SC") || editorRequest != MusicalObjectSound::Playback::superCollider)
+    {
+        std::cerr << "Carousel sound chooser did not expose its SC editor button\n";
+        return 1;
+    }
+    playbackChoice->setSelectedItemIndex (2, juce::sendNotificationSync);
+    if (! clickEditorButton ("Open Pd") || editorRequest != MusicalObjectSound::Playback::pureData)
+    {
+        std::cerr << "Carousel sound chooser did not expose its Pd editor button\n";
         return 1;
     }
 
@@ -105,6 +155,12 @@ int main()
         return 1;
     }
     juce::String performanceFailure;
+    juce::String attachmentFailure;
+    if (! editor.runAttachmentSmokeChecks (attachmentFailure))
+    {
+        std::cerr << attachmentFailure << '\n';
+        return 1;
+    }
     if (! editor.runPerformanceSmokeChecks (performanceFailure))
     {
         std::cerr << performanceFailure << '\n';

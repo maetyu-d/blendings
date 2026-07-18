@@ -842,6 +842,10 @@ public:
         playbackBox.addListener (this);
         playbackBox.setTooltip ("Choose what this Pipe disc plays");
         addAndMakeVisible (playbackBox);
+        soundStatusLabel.setColour (juce::Label::textColourId, PipeLookAndFeel::muted);
+        soundStatusLabel.setFont (juce::FontOptions (11.0f));
+        soundStatusLabel.setJustificationType (juce::Justification::centredLeft);
+        addAndMakeVisible (soundStatusLabel);
 
         scCodeDocument.replaceAllContent (defaultScProgram());
         scCodeEditor = std::make_unique<juce::CodeEditorComponent> (scCodeDocument, &scTokeniser);
@@ -882,6 +886,7 @@ public:
         noteSlider.setVisible (false);
         soundButton.setVisible (false);
         auditionButton.setVisible (false);
+        soundStatusLabel.setVisible (false);
         compileScButton.setVisible (false);
         resetScButton.setVisible (false);
         loadScButton.setVisible (false);
@@ -1319,7 +1324,10 @@ public:
         layerSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 42, 24);
         layerSlider.setBounds (layerArea);
 
-        auto noteArea = layerArea.withY (layerArea.getBottom() + 60).withHeight (34);
+        auto soundArea = layerArea.withY (layerArea.getBottom() + 48).withHeight (34);
+        playbackBox.setBounds (soundArea);
+        durationSlider.setBounds (soundArea.translated (0, 40));
+        auto noteArea = soundArea.translated (0, 80);
         const auto noteGap = 8;
         const auto noteW = (noteArea.getWidth() - noteGap) / 2;
         noteDownButton.setBounds (noteArea.removeFromLeft (noteW));
@@ -1327,13 +1335,9 @@ public:
         noteUpButton.setBounds (noteArea);
         soundButton.setBounds (noteDownButton.getBounds());
         auditionButton.setBounds (noteUpButton.getBounds());
+        soundStatusLabel.setBounds (noteArea.translated (0, 40));
 
-        // Sound editing now lives in the dedicated Sound callout/full editors.
-        // Keep the retired inline controls unlaid-out so state changes cannot
-        // expose them below the visible panel.
         noteSlider.setBounds ({});
-        playbackBox.setBounds ({});
-        durationSlider.setBounds ({});
 
         if (scMode)
         {
@@ -1656,6 +1660,7 @@ private:
     juce::TextButton noteUpButton;
     juce::TextButton soundButton;
     juce::TextButton auditionButton;
+    juce::Label soundStatusLabel;
     juce::TextButton compileScButton;
     juce::TextButton resetScButton;
     juce::TextButton loadScButton;
@@ -2548,10 +2553,10 @@ private:
         noteDownButton.setVisible (false);
         noteUpButton.setVisible (false);
         noteSlider.setVisible (false);
-        playbackBox.setVisible (false);
-        durationSlider.setVisible (false);
-        soundButton.setVisible (hasValve);
+        playbackBox.setVisible (hasValve);
+        durationSlider.setVisible (hasValve);
         auditionButton.setVisible (hasValve);
+        soundStatusLabel.setVisible (hasValve);
 
         updatingNoteSlider = true;
         if (const auto* valve = selectedValve())
@@ -2559,7 +2564,18 @@ private:
             noteSlider.setValue (valve->midiNote, juce::dontSendNotification);
             playbackBox.setSelectedItemIndex ((int) valve->playback, juce::dontSendNotification);
             durationSlider.setValue (valve->durationSeconds, juce::dontSendNotification);
+            const auto codeSound = valve->playback != otherware::PipeWorkspaceDiscTrigger::PlaybackType::synth;
+            const auto source = valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider
+                                  ? scProgramForValve (*valve) : valve->pdPatch;
+            const juce::String name = valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider ? "SC" : "Pd";
+            soundButton.setVisible (codeSound);
+            soundButton.setButtonText ("OPEN " + name.toUpperCase());
+            soundButton.setTooltip ("Open the full " + name + " editor");
+            soundStatusLabel.setText (codeSound ? name + (source.trim().isNotEmpty() ? " configured" : " needs source")
+                                                 : "Tuned synth",
+                                      juce::dontSendNotification);
         }
+        else soundButton.setVisible (false);
         updatingNoteSlider = false;
     }
 
@@ -2637,9 +2653,8 @@ private:
             return;
         auto editor = std::make_unique<MusicalObjectEditorComponent> (soundForValve (*valve));
         auto editorRef = std::make_shared<juce::Component::SafePointer<MusicalObjectEditorComponent>> (editor.get());
-        auto externalEditorPending = std::make_shared<bool> (false);
         const auto safeThis = juce::Component::SafePointer<PipeWorkspaceComponent> (this);
-        editor->onChange = [safeThis, position, editorRef, externalEditorPending] (const MusicalObjectSound& sound)
+        editor->onChange = [safeThis, position] (const MusicalObjectSound& sound)
         {
             if (safeThis == nullptr) return;
             if (auto* target = safeThis->network.valveAt (position))
@@ -2654,23 +2669,20 @@ private:
                 if (safeThis->onWorkspaceChanged) safeThis->onWorkspaceChanged();
                 safeThis->updateInspectorControls();
                 safeThis->repaint();
-                const auto needsScEditor = target->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider;
-                const auto needsPdEditor = target->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::pureData;
-                if ((needsScEditor || needsPdEditor) && ! *externalEditorPending)
-                {
-                    *externalEditorPending = true;
-                    juce::MessageManager::callAsync ([safeThis, position, editorRef, needsScEditor]
-                    {
-                        if (auto* editorComponent = editorRef->getComponent())
-                            if (auto* callout = editorComponent->findParentComponentOfClass<juce::CallOutBox>())
-                                callout->dismiss();
-
-                        if (safeThis == nullptr) return;
-                        if (needsScEditor) safeThis->openScEditorForValve (position);
-                        else               safeThis->openPdEditorForValve (position);
-                    });
-                }
             }
+        };
+        editor->onOpenEditor = [safeThis, position, editorRef] (const MusicalObjectSound& sound)
+        {
+            if (auto* editorComponent = editorRef->getComponent())
+                if (auto* callout = editorComponent->findParentComponentOfClass<juce::CallOutBox>())
+                    callout->dismiss();
+            const auto openSc = sound.playback == MusicalObjectSound::Playback::superCollider;
+            juce::MessageManager::callAsync ([safeThis, position, openSc]
+            {
+                if (safeThis == nullptr) return;
+                if (openSc) safeThis->openScEditorForValve (position);
+                else        safeThis->openPdEditorForValve (position);
+            });
         };
         editor->onPreview = [safeThis, position] (const MusicalObjectSound&)
         {
@@ -4027,7 +4039,17 @@ private:
         else if (button == &stopButton)  setPlaying (false);
         else if (button == &noteDownButton) adjustSelectedValveNote (-1);
         else if (button == &noteUpButton)   adjustSelectedValveNote (1);
-        else if (button == &soundButton) openSelectedValveSoundEditor();
+        else if (button == &soundButton)
+        {
+            if (const auto position = selectedVoxel())
+                if (const auto* valve = network.valveAt (*position))
+                {
+                    if (valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider)
+                        openScEditorForValve (*position);
+                    else if (valve->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::pureData)
+                        openPdEditorForValve (*position);
+                }
+        }
         else if (button == &auditionButton)
         {
             if (const auto voxel = selectedVoxel()) auditionValve (*voxel);
