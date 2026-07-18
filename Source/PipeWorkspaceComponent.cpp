@@ -1045,9 +1045,13 @@ public:
 
         updateInspectorControls();
         resized();
-        if (! playbackBox.getBounds().isEmpty() || ! durationSlider.getBounds().isEmpty())
+        const auto soundControls = playbackBox.getBounds().getUnion (durationSlider.getBounds())
+                                                   .getUnion (soundButton.getBounds())
+                                                   .getUnion (auditionButton.getBounds())
+                                                   .getUnion (soundStatusLabel.getBounds());
+        if (soundControls.isEmpty() || ! getLocalBounds().contains (soundControls))
         {
-            failure = "Pipe World sound controls escaped the visible layout";
+            failure = "Pipe World sound controls do not fit inside the window";
             return false;
         }
 
@@ -1302,9 +1306,9 @@ public:
                             .withCentre ({ nav.getCentreX(), nav.getY() + cardSide * 0.5f });
 
         auto faceArea = juce::Rectangle<int> ((int) card.getX(),
-                                              (int) card.getBottom() + 28,
+                                              (int) card.getBottom() + 16,
                                               (int) card.getWidth(),
-                                              82);
+                                              70);
         const auto gap = 7;
         const auto faceW = (faceArea.getWidth() - gap * 2) / 3;
         const auto faceH = (faceArea.getHeight() - gap) / 2;
@@ -1319,23 +1323,20 @@ public:
                                                 faceH);
         }
 
-        auto layerArea = faceArea.withY (faceArea.getBottom() + 28).withHeight (42);
+        auto layerArea = faceArea.withY (faceArea.getBottom() + 14).withHeight (34);
         layerSlider.setSliderStyle (juce::Slider::LinearHorizontal);
         layerSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 42, 24);
         layerSlider.setBounds (layerArea);
 
-        auto soundArea = layerArea.withY (layerArea.getBottom() + 48).withHeight (34);
+        auto soundArea = layerArea.withY (layerArea.getBottom() + 10).withHeight (30);
         playbackBox.setBounds (soundArea);
-        durationSlider.setBounds (soundArea.translated (0, 40));
-        auto noteArea = soundArea.translated (0, 80);
-        const auto noteGap = 8;
-        const auto noteW = (noteArea.getWidth() - noteGap) / 2;
-        noteDownButton.setBounds (noteArea.removeFromLeft (noteW));
-        noteArea.removeFromLeft (noteGap);
-        noteUpButton.setBounds (noteArea);
+        durationSlider.setBounds (soundArea.translated (0, 36).withHeight (28));
+        auto actionArea = durationSlider.getBounds().translated (0, 36).withHeight (32);
+        noteDownButton.setBounds (actionArea.removeFromLeft (92));
+        noteUpButton.setBounds (actionArea.removeFromRight (92));
         soundButton.setBounds (noteDownButton.getBounds());
         auditionButton.setBounds (noteUpButton.getBounds());
-        soundStatusLabel.setBounds (noteArea.translated (0, 40));
+        soundStatusLabel.setBounds (actionArea.reduced (6, 0));
 
         noteSlider.setBounds ({});
 

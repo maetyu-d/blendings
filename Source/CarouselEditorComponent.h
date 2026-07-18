@@ -112,6 +112,7 @@ private:
     void positionPlanksForOrbit (int orbitId);
     void translateDependents (int parentId, float dx, float dy);
     int compatibleAttachmentTargetAt (juce::Point<float> gridPosition, int childId) const;
+    bool wouldCreateAttachmentCycle (int childId, int parentId) const;
     bool attachItemTo (int childId, int parentId);
     int orbitToneCount (int orbitId) const;
     void setOrbitToneCount (int count);

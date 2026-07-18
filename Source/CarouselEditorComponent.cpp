@@ -590,7 +590,7 @@ int CarouselEditorComponent::compatibleAttachmentTargetAt (juce::Point<float> gr
                              || (childType == CarouselDocument::ItemType::tone
                                  && (candidate.type == CarouselDocument::ItemType::orbit || candidate.type == CarouselDocument::ItemType::plank))
                              || (childType == CarouselDocument::ItemType::orbit && candidate.type == CarouselDocument::ItemType::plank);
-        if (candidate.id == childId || ! compatible) continue;
+        if (candidate.id == childId || ! compatible || wouldCreateAttachmentCycle (childId, candidate.id)) continue;
         if (candidate.type == CarouselDocument::ItemType::plank)
         {
             const auto occupied = std::any_of (document.items.begin(), document.items.end(), [&candidate, childId] (const auto& item)
@@ -609,6 +609,23 @@ int CarouselEditorComponent::compatibleAttachmentTargetAt (juce::Point<float> gr
     return bestId;
 }
 
+bool CarouselEditorComponent::wouldCreateAttachmentCycle (int childId, int parentId) const
+{
+    if (childId < 0 || parentId < 0) return false;
+    std::set<int> visited;
+    auto currentId = parentId;
+    while (currentId >= 0)
+    {
+        if (currentId == childId || ! visited.insert (currentId).second) return true;
+        const auto current = std::find_if (document.items.begin(), document.items.end(), [currentId] (const auto& item)
+        {
+            return item.id == currentId;
+        });
+        currentId = current != document.items.end() ? current->ownerOrbit : -1;
+    }
+    return false;
+}
+
 bool CarouselEditorComponent::attachItemTo (int childId, int parentId)
 {
     auto child = std::find_if (document.items.begin(), document.items.end(), [childId] (const auto& item) { return item.id == childId; });
@@ -618,7 +635,7 @@ bool CarouselEditorComponent::attachItemTo (int childId, int parentId)
                          || (child->type == CarouselDocument::ItemType::tone && parent->type == CarouselDocument::ItemType::orbit)
                          || ((child->type == CarouselDocument::ItemType::tone || child->type == CarouselDocument::ItemType::orbit)
                              && parent->type == CarouselDocument::ItemType::plank);
-    if (! compatible) return false;
+    if (! compatible || wouldCreateAttachmentCycle (childId, parentId)) return false;
 
     child->ownerOrbit = parentId;
     if (child->type == CarouselDocument::ItemType::plank)
@@ -863,7 +880,7 @@ void CarouselEditorComponent::refreshAttachmentInspector()
                                           ? (candidate.type == CarouselDocument::ItemType::orbit
                                              || candidate.type == CarouselDocument::ItemType::plank)
                                           : candidate.type == CarouselDocument::ItemType::plank;
-            if (! compatible) continue;
+            if (! compatible || wouldCreateAttachmentCycle (item->id, candidate.id)) continue;
             const auto name = candidate.type == CarouselDocument::ItemType::orbit ? "Carousel " : "Plank ";
             attachmentBox.addItem (name + juce::String (candidate.id), candidate.id + 2);
             if (candidate.id == item->ownerOrbit) selectedId = candidate.id + 2;
@@ -894,28 +911,13 @@ void CarouselEditorComponent::changeSelectedAttachment()
     if (newParent == item->ownerOrbit) return;
     pushUndoState();
     item = selectedItem();
-    item->ownerOrbit = newParent;
-    if (newParent >= 0)
+    if (newParent < 0)
+        item->ownerOrbit = -1;
+    else if (! attachItemTo (item->id, newParent))
     {
-        const auto parent = std::find_if (document.items.begin(), document.items.end(), [newParent] (const auto& candidate)
-        {
-            return candidate.id == newParent;
-        });
-        if (parent != document.items.end())
-        {
-            if (item->type == CarouselDocument::ItemType::plank)
-                updatePlankGeometry (*item);
-            else if (item->type == CarouselDocument::ItemType::tone
-                     && parent->type == CarouselDocument::ItemType::orbit)
-                arrangeOrbit (parent->id);
-            else
-            {
-                const auto dx = parent->x - item->x, dy = parent->y - item->y;
-                item->x = parent->x;
-                item->y = parent->y;
-                translateDependents (item->id, dx, dy);
-            }
-        }
+        undoHistory.pop_back();
+        refreshAttachmentInspector();
+        return;
     }
     changed();
     refreshInspector();
@@ -1167,6 +1169,11 @@ bool CarouselEditorComponent::runAttachmentSmokeChecks (juce::String& failureMes
         || std::hypot (moved->x - plank.x, moved->y - plank.y) > 0.01f)
     {
         failureMessage = "Plank attachment did not move the tone to its endpoint";
+        return false;
+    }
+    if (attachItemTo (firstOrbit.id, plank.id))
+    {
+        failureMessage = "Carousel accepted an attachment cycle through its own plank";
         return false;
     }
 
