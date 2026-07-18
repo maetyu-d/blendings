@@ -842,6 +842,17 @@ public:
         playbackBox.addListener (this);
         playbackBox.setTooltip ("Choose what this Pipe disc plays");
         addAndMakeVisible (playbackBox);
+        for (auto* label : { &playbackInspectorLabel, &durationInspectorLabel })
+        {
+            label->setColour (juce::Label::textColourId, PipeLookAndFeel::muted);
+            label->setFont (juce::FontOptions (11.0f));
+            label->setJustificationType (juce::Justification::centredLeft);
+            addAndMakeVisible (*label);
+        }
+        playbackInspectorLabel.setText ("Sound", juce::dontSendNotification);
+        durationInspectorLabel.setText ("Duration", juce::dontSendNotification);
+        playbackInspectorLabel.setVisible (false);
+        durationInspectorLabel.setVisible (false);
         soundStatusLabel.setColour (juce::Label::textColourId, PipeLookAndFeel::muted);
         soundStatusLabel.setFont (juce::FontOptions (11.0f));
         soundStatusLabel.setJustificationType (juce::Justification::centredLeft);
@@ -1045,7 +1056,9 @@ public:
 
         updateInspectorControls();
         resized();
-        const auto soundControls = playbackBox.getBounds().getUnion (durationSlider.getBounds())
+        const auto soundControls = playbackInspectorLabel.getBounds().getUnion (playbackBox.getBounds())
+                                                   .getUnion (durationInspectorLabel.getBounds())
+                                                   .getUnion (durationSlider.getBounds())
                                                    .getUnion (soundButton.getBounds())
                                                    .getUnion (auditionButton.getBounds())
                                                    .getUnion (soundStatusLabel.getBounds());
@@ -1054,6 +1067,12 @@ public:
             failure = "Pipe World sound controls do not fit inside the window";
             return false;
         }
+        for (auto* button : { &selectButton, &pipeButton, &tapButton, &valveButton, &drainButton, &eraseButton })
+            if (button->getName().isEmpty() || button->getTooltip().isEmpty() || ! button->getWantsKeyboardFocus())
+            {
+                failure = "Pipe World tool is missing keyboard or accessibility metadata";
+                return false;
+            }
 
         auto pdEditorOpened = false;
         setPdEditorCallback ([&pdEditorOpened] (const juce::String& patch, float duration,
@@ -1329,8 +1348,12 @@ public:
         layerSlider.setBounds (layerArea);
 
         auto soundArea = layerArea.withY (layerArea.getBottom() + 10).withHeight (30);
-        playbackBox.setBounds (soundArea);
-        durationSlider.setBounds (soundArea.translated (0, 36).withHeight (28));
+        auto playbackRow = soundArea;
+        playbackInspectorLabel.setBounds (playbackRow.removeFromLeft (64));
+        playbackBox.setBounds (playbackRow);
+        auto durationRow = soundArea.translated (0, 36).withHeight (28);
+        durationInspectorLabel.setBounds (durationRow.removeFromLeft (64));
+        durationSlider.setBounds (durationRow);
         auto actionArea = durationSlider.getBounds().translated (0, 36).withHeight (32);
         noteDownButton.setBounds (actionArea.removeFromLeft (92));
         noteUpButton.setBounds (actionArea.removeFromRight (92));
@@ -1643,6 +1666,8 @@ private:
     juce::ComboBox keyBox;
     juce::ComboBox scaleBox;
     juce::ComboBox playbackBox;
+    juce::Label playbackInspectorLabel;
+    juce::Label durationInspectorLabel;
     std::array<juce::TextButton, 6> faceButtons;
     juce::Slider layerSlider;
     juce::Slider tempoSlider;
@@ -2062,8 +2087,10 @@ private:
 
     void setupButton (juce::TextButton& button, const juce::String& text, const juce::String& tooltip)
     {
+        button.setName (text);
         button.setButtonText (text);
         button.setTooltip (tooltip);
+        button.setWantsKeyboardFocus (true);
         BlendingsInspector::styleButton (button);
         button.addListener (this);
         addAndMakeVisible (button);
@@ -2555,6 +2582,8 @@ private:
         noteUpButton.setVisible (false);
         noteSlider.setVisible (false);
         playbackBox.setVisible (hasValve);
+        playbackInspectorLabel.setVisible (hasValve);
+        durationInspectorLabel.setVisible (hasValve);
         durationSlider.setVisible (hasValve);
         auditionButton.setVisible (hasValve);
         soundStatusLabel.setVisible (hasValve);

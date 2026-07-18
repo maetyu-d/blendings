@@ -67,6 +67,7 @@ public:
     bool openFullSoundEditor (int toneId);
     bool runPerformanceSmokeChecks (juce::String& failureMessage);
     bool runAttachmentSmokeChecks (juce::String& failureMessage);
+    bool runVisualInteractionSmokeChecks (juce::String& failureMessage);
     bool undo();
     bool redo();
 

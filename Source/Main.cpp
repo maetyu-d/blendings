@@ -2973,6 +2973,16 @@ public:
     }
 
     double flowBeatForTesting() const noexcept { return flowBeatPosition; }
+
+    juce::ValueTree projectStateForTesting() const { return createProjectState(); }
+
+    std::vector<DiscAudioTrigger> allDiscTriggersForTesting() const
+    {
+        std::vector<DiscAudioTrigger> result;
+        for (int i = 0; i < static_cast<int> (rootDiscs.size()); ++i)
+            appendDiscAudioTriggers (rootDiscs[static_cast<size_t> (i)], 0, i, result);
+        return result;
+    }
 #endif
 
     struct ScCodeInfo
@@ -5420,6 +5430,72 @@ public:
         }), newDiscs.end());
         if (newDiscs.size() != oldDiscCount && recoveryReport != nullptr)
             recoveryReport->add (juce::String (oldDiscCount - newDiscs.size()) + " invalid discs were removed");
+
+        auto repairedNestedRelationships = 0;
+        const auto repairTeleports = [&repairedNestedRelationships] (auto& teleports)
+        {
+            for (auto& teleport : teleports)
+                if (teleport.destinationId.isNotEmpty()
+                    && std::none_of (teleports.begin(), teleports.end(), [&] (const auto& destination)
+                    { return destination.id == teleport.destinationId && destination.id != teleport.id; }))
+                {
+                    teleport.destinationId.clear();
+                    ++repairedNestedRelationships;
+                }
+        };
+        repairTeleports (newTeleports);
+        std::function<void (std::vector<Disc>&)> repairNestedWorlds;
+        repairNestedWorlds = [&] (std::vector<Disc>& worlds)
+        {
+            worlds.erase (std::remove_if (worlds.begin(), worlds.end(), [&] (const auto& disc)
+            {
+                const auto invalid = ! std::isfinite (disc.centre.x) || ! std::isfinite (disc.centre.y);
+                if (invalid) ++repairedNestedRelationships;
+                return invalid;
+            }), worlds.end());
+            for (auto& disc : worlds)
+            {
+                disc.nestedRoutes.erase (std::remove_if (disc.nestedRoutes.begin(), disc.nestedRoutes.end(), [&] (const auto& route)
+                {
+                    const auto invalid = route.points.size() < 2 || std::any_of (route.points.begin(), route.points.end(), [] (const auto& point)
+                    { return ! std::isfinite (point.x) || ! std::isfinite (point.y); });
+                    if (invalid) ++repairedNestedRelationships;
+                    return invalid;
+                }), disc.nestedRoutes.end());
+                repairTeleports (disc.nestedPipeTeleports);
+                repairNestedWorlds (disc.nestedDiscs);
+            }
+        };
+        repairNestedWorlds (newDiscs);
+
+        const auto containsId = [] (const auto& items, const juce::String& id)
+        { return std::any_of (items.begin(), items.end(), [&] (const auto& item) { return item.id == id; }); };
+        const auto targetExists = [&] (const ModulationConnection& connection)
+        {
+            switch (connection.targetKind)
+            {
+                case ModulationTargetKind::disc:       return containsId (newDiscs, connection.targetId);
+                case ModulationTargetKind::tap:        return containsId (newTaps, connection.targetId);
+                case ModulationTargetKind::drain:      return containsId (newDrains, connection.targetId);
+                case ModulationTargetKind::quantum:    return containsId (newCloners, connection.targetId);
+                case ModulationTargetKind::speedLimit: return containsId (newSpeedLimits, connection.targetId);
+                case ModulationTargetKind::wait:       return containsId (newWaits, connection.targetId);
+                case ModulationTargetKind::strike:     return containsId (newStrikes, connection.targetId);
+                case ModulationTargetKind::teleport:   return containsId (newTeleports, connection.targetId);
+                case ModulationTargetKind::filter:     return containsId (newFilters, connection.targetId);
+                case ModulationTargetKind::logic:      return containsId (newLogics, connection.targetId);
+            }
+            return false;
+        };
+        const auto oldConnectionCount = newModulationConnections.size();
+        newModulationConnections.erase (std::remove_if (newModulationConnections.begin(), newModulationConnections.end(), [&] (const auto& connection)
+        {
+            return ! containsId (newModulators, connection.sourceId) || ! targetExists (connection)
+                || ! juce::isPositiveAndBelow (connection.parameter, modulationParameterNames (connection.targetKind).size());
+        }), newModulationConnections.end());
+        repairedNestedRelationships += static_cast<int> (oldConnectionCount - newModulationConnections.size());
+        if (repairedNestedRelationships > 0 && recoveryReport != nullptr)
+            recoveryReport->add (juce::String (repairedNestedRelationships) + " invalid saved relationships were repaired");
         rootRoutes = std::move (newRoutes);
         rootPipeTaps = std::move (newTaps);
         rootPipeDrains = std::move (newDrains);
@@ -13176,6 +13252,15 @@ public:
         if (command && key.getKeyCode() == 'S') { key.getModifiers().isShiftDown() ? saveProjectAs() : saveProject(); return true; }
         if (command && key.getKeyCode() == 'W') { closeApplicationWindow(); return true; }
         if (command && key.getKeyCode() == 'Z') { key.getModifiers().isShiftDown() ? canvas.redo() : canvas.undo(); updateStatus(); return true; }
+        if (! command)
+        {
+            const auto text = key.getTextCharacter();
+            if (text == '1') { setTool (RoadCanvas::Tool::select); return true; }
+            if (text == '2') { setTool (RoadCanvas::Tool::pipe); return true; }
+            if (text == '3') { setTool (RoadCanvas::Tool::disc); return true; }
+            if (text == '4') { setTool (RoadCanvas::Tool::tap); return true; }
+            if (text == '5') { setTool (RoadCanvas::Tool::drain); return true; }
+        }
         if (key.getKeyCode() == 'B' && ! command) { if (canvas.toggleSelectedDeviceBypass()) updateStatus(); return true; }
         if (key == juce::KeyPress::spaceKey) { setTransportRunning (! transportRunning); return true; }
         if (key == juce::KeyPress::backspaceKey || key == juce::KeyPress::deleteKey)
@@ -15547,7 +15632,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.7.2"; }
+    const juce::String getApplicationVersion() override    { return "0.7.3"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String&) override
@@ -15677,6 +15762,60 @@ int main (int argc, char** argv)
         return 3;
     }
 
+    const auto savedState = canvas.projectStateForTesting();
+    RoadCanvas roundTripCanvas;
+    if (! roundTripCanvas.applyProjectState (savedState.createCopy()))
+    {
+        std::fprintf (stderr, "Playback smoke: project state did not reload\n");
+        return 6;
+    }
+    const auto firstXml = savedState.createXml();
+    const auto secondXml = roundTripCanvas.projectStateForTesting().createXml();
+    if (firstXml == nullptr || secondXml == nullptr || firstXml->toString() != secondXml->toString())
+    {
+        std::fprintf (stderr, "Playback smoke: project state changed during save/load round trip\n");
+        return 7;
+    }
+
+    auto nestedState = savedState.createCopy();
+    auto nestedDiscs = nestedState.getChildWithName ("discs");
+    if (nestedDiscs.getNumChildren() == 0)
+    {
+        std::fprintf (stderr, "Playback smoke: demo has no disc for nested playback coverage\n");
+        return 8;
+    }
+    auto parentDisc = nestedDiscs.getChild (0);
+    parentDisc.setProperty ("worlds", 1, nullptr);
+    auto childDiscs = parentDisc.getChildWithName ("discs");
+    juce::ValueTree childDisc ("disc");
+    childDisc.setProperty ("id", "nested-smoke-disc", nullptr);
+    childDisc.setProperty ("x", 24.0f, nullptr); childDisc.setProperty ("y", 24.0f, nullptr);
+    childDisc.setProperty ("sounds", 1, nullptr); childDisc.setProperty ("worlds", 0, nullptr);
+    juce::ValueTree nestedSc ("scCode");
+    nestedSc.setProperty ("code", "{ SinOsc.ar(440) * 0.01 }", nullptr);
+    nestedSc.setProperty ("duration", 0.1f, nullptr); childDisc.addChild (nestedSc, -1, nullptr);
+    for (const auto section : { "routes", "pipeTaps", "pipeDrains", "pipeCloners", "pipeSpeedLimits",
+                                "pipeWaits", "pipeStrikes", "pipeTeleports", "pipeFilters", "pipeLogics", "discs" })
+        childDisc.addChild (juce::ValueTree (section), -1, nullptr);
+    childDiscs.addChild (childDisc, -1, nullptr);
+
+    RoadCanvas nestedCanvas;
+    if (! nestedCanvas.applyProjectState (nestedState))
+    {
+        std::fprintf (stderr, "Playback smoke: nested project did not load\n");
+        return 9;
+    }
+    const auto nestedTriggers = nestedCanvas.allDiscTriggersForTesting();
+    const auto hasNestedPulse = std::any_of (nestedTriggers.begin(), nestedTriggers.end(), [] (const auto& trigger)
+    { return trigger.nestedWorldPulse; });
+    const auto hasNestedSound = std::any_of (nestedTriggers.begin(), nestedTriggers.end(), [] (const auto& trigger)
+    { return trigger.depth > 0 && (trigger.soundElementCount > 0 || trigger.hasScCode() || trigger.hasPdPatch()); });
+    if (! hasNestedPulse || ! hasNestedSound)
+    {
+        std::fprintf (stderr, "Playback smoke: nested elements were not traversed\n");
+        return 10;
+    }
+
     ScDiscAudioEngine audio;
     constexpr double sampleRate = 44100.0;
     constexpr int blockSize = 512;
@@ -15723,7 +15862,8 @@ int main (int argc, char** argv)
     audio.release();
 
     if (triggerCount < 2 || peak < 0.0001f || finalBeat < 32.0 || resetBeat > 0.001
-        || ! performance.stressMode || performance.stressWorkUnits == 0)
+        || ! performance.stressMode || performance.stressWorkUnits == 0
+        || ! std::isfinite (performance.flowUpdateMs) || performance.flowUpdateMs > 50.0)
     {
         std::fprintf (stderr,
                       "Playback smoke failed: triggers=%d peak=%.5f beat=%.2f reset=%.3f probes=%zu\n",

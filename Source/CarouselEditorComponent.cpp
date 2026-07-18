@@ -313,7 +313,7 @@ CarouselEditorComponent::CarouselEditorComponent()
 
 CarouselEditorComponent::~CarouselEditorComponent() { stopTimer(); }
 void CarouselEditorComponent::setDocument (const CarouselDocument& d) { suppress = true; document = d; for (auto& item : document.items) ensureToneSources (item); selected = -1; undoHistory.clear(); redoHistory.clear(); bpmSlider.setValue (d.bpm); columnsBox.setSelectedId (d.columns, juce::dontSendNotification); rowsBox.setSelectedId (d.rows, juce::dontSendNotification); suppress = false; refreshInspector(); repaint(); }
-void CarouselEditorComponent::setRunning (bool value) { running = value; contacts.clear(); lastTime = juce::Time::getMillisecondCounterHiRes(); playButton.setButtonText (running ? "stop" : "play"); repaint(); }
+void CarouselEditorComponent::setRunning (bool value) { running = value; contacts.clear(); lastTime = juce::Time::getMillisecondCounterHiRes(); playButton.setButtonText (running ? "Stop" : "Play"); repaint(); }
 void CarouselEditorComponent::setTool (Tool value) { tool = value; repaint(); }
 CarouselDocument::Item* CarouselEditorComponent::selectedItem() { for (auto& i : document.items) if (i.id == selected) return &i; return nullptr; }
 const CarouselDocument::Item* CarouselEditorComponent::selectedItem() const { for (const auto& i : document.items) if (i.id == selected) return &i; return nullptr; }
@@ -523,7 +523,24 @@ void CarouselEditorComponent::mouseDrag (const juce::MouseEvent& e)
 }
 void CarouselEditorComponent::mouseUp (const juce::MouseEvent&) { if(panning){panning=false;return;}if(dragged>=0&&dragAttachmentTarget>=0)attachItemTo(dragged,dragAttachmentTarget);if(auto*i=selectedItem()){const auto orbitParent=i->ownerOrbit>=0?std::find_if(document.items.begin(),document.items.end(),[i](const auto& candidate){return candidate.id==i->ownerOrbit&&candidate.type==CarouselDocument::ItemType::orbit;}):document.items.end();if(!(i->type==CarouselDocument::ItemType::tone&&orbitParent!=document.items.end())){i->x=snapCarouselCoordinate(i->x);i->y=snapCarouselCoordinate(i->y);}if(i->type==CarouselDocument::ItemType::orbit)arrangeOrbit(i->id);else if(i->type==CarouselDocument::ItemType::plank)updatePlankGeometry(*i);else if(i->type==CarouselDocument::ItemType::tone&&orbitParent!=document.items.end())arrangeOrbit(orbitParent->id);if(i->ownerOrbit>=0&&(i->type==CarouselDocument::ItemType::tone||i->type==CarouselDocument::ItemType::orbit))if(const auto mount=std::find_if(document.items.begin(),document.items.end(),[i](const auto& candidate){return candidate.id==i->ownerOrbit&&candidate.type==CarouselDocument::ItemType::plank;});mount!=document.items.end()){const auto dx=mount->x-i->x,dy=mount->y-i->y;i->x=mount->x;i->y=mount->y;translateDependents(i->id,dx,dy);}}dragged=-1;dragAttachmentTarget=-1;dragDetachedFromParent=false;if(dragHistoryStarted){dragHistoryStarted=false;changed();refreshInspector();}repaint(); }
 void CarouselEditorComponent::mouseWheelMove (const juce::MouseEvent& e,const juce::MouseWheelDetails&w){if(!fieldViewport().contains(e.position))return;const auto before=gridPoint(e.position);const auto old=zoom;zoom=juce::jlimit(.45f,3.0f,zoom*std::pow(1.15f,w.deltaY*4));if(!juce::approximatelyEqual(old,zoom))pan+=e.position-screenPoint(before);repaint();}
-bool CarouselEditorComponent::keyPressed (const juce::KeyPress& k){const auto command=k.getModifiers().isCommandDown();if(command&&k.getKeyCode()=='Z')return k.getModifiers().isShiftDown()?redo():undo();if(command&&k.getKeyCode()=='Y')return redo();if(k==juce::KeyPress::backspaceKey||k==juce::KeyPress::deleteKey){deleteSelected();return true;}if(k==juce::KeyPress::spaceKey){setRunning(!running);return true;}return false;}
+bool CarouselEditorComponent::keyPressed (const juce::KeyPress& k)
+{
+    const auto command = k.getModifiers().isCommandDown();
+    if (command && k.getKeyCode() == 'Z') return k.getModifiers().isShiftDown() ? redo() : undo();
+    if (command && k.getKeyCode() == 'Y') return redo();
+    if (! command)
+    {
+        const auto text = k.getTextCharacter();
+        if (text == '1') { setTool (Tool::select); return true; }
+        if (text == '2') { setTool (Tool::tone); return true; }
+        if (text == '3') { setTool (Tool::orbit); return true; }
+        if (text == '4') { setTool (Tool::post); return true; }
+        if (text == '5') { setTool (Tool::plank); return true; }
+    }
+    if (k == juce::KeyPress::backspaceKey || k == juce::KeyPress::deleteKey) { deleteSelected(); return true; }
+    if (k == juce::KeyPress::spaceKey) { setRunning (! running); return true; }
+    return false;
+}
 void CarouselEditorComponent::deleteSelected(){const int id=selected;if(id<0)return;pushUndoState();std::set<int> removed{id};for(bool added=true;added;){added=false;for(const auto&i:document.items)if(i.ownerOrbit>=0&&removed.count(i.ownerOrbit)&&!removed.count(i.id)){removed.insert(i.id);added=true;}}document.items.erase(std::remove_if(document.items.begin(),document.items.end(),[&removed](const auto&i){return removed.count(i.id)>0;}),document.items.end());selected=-1;changed();refreshInspector();}
 int CarouselEditorComponent::orbitToneCount(int id)const{int n=0;for(const auto&i:document.items)if(i.type==CarouselDocument::ItemType::tone&&i.ownerOrbit==id)++n;return n;}
 void CarouselEditorComponent::setOrbitToneCount(int count){auto*o=selectedItem();if(!o||o->type!=CarouselDocument::ItemType::orbit||orbitToneCount(o->id)==count)return;pushUndoState();o=selectedItem();int n=orbitToneCount(o->id);while(n<count){CarouselDocument::Item i;i.id=document.nextId++;i.type=CarouselDocument::ItemType::tone;i.ownerOrbit=o->id;i.midi=48+(n%8)*3;i.voice=n%4;ensureToneSources(i);document.items.push_back(i);++n;}while(n>count){auto it=std::find_if(document.items.rbegin(),document.items.rend(),[o](const auto&i){return i.type==CarouselDocument::ItemType::tone&&i.ownerOrbit==o->id;});if(it==document.items.rend())break;document.items.erase(std::next(it).base());--n;}arrangeOrbit(o->id);changed();}
@@ -1177,5 +1194,72 @@ bool CarouselEditorComponent::runAttachmentSmokeChecks (juce::String& failureMes
         return false;
     }
 
+    return true;
+}
+
+bool CarouselEditorComponent::runVisualInteractionSmokeChecks (juce::String& failureMessage)
+{
+    CarouselDocument test;
+    test.columns = 12;
+    test.rows = 8;
+    test.nextId = 5;
+    CarouselDocument::Item orbit; orbit.id = 1; orbit.type = CarouselDocument::ItemType::orbit; orbit.x = 4.0f; orbit.y = 4.0f; orbit.radius = 1.5f;
+    CarouselDocument::Item tone; tone.id = 2; tone.type = CarouselDocument::ItemType::tone; tone.ownerOrbit = orbit.id; tone.x = 5.5f; tone.y = 4.0f;
+    CarouselDocument::Item plank; plank.id = 3; plank.type = CarouselDocument::ItemType::plank; plank.ownerOrbit = orbit.id; plank.phase = 0.0f; plank.radius = 2.5f; plank.x = 6.5f; plank.y = 4.0f;
+    CarouselDocument::Item post; post.id = 4; post.type = CarouselDocument::ItemType::post; post.x = 8.0f; post.y = 3.0f;
+    test.items = { orbit, tone, plank, post };
+    setDocument (test);
+
+    if (compatibleAttachmentTargetAt ({ tone.x, tone.y }, tone.id) != orbit.id
+        || compatibleAttachmentTargetAt ({ plank.x, plank.y }, tone.id) != plank.id)
+    {
+        failureMessage = "Carousel attachment highlighting missed a compatible target";
+        return false;
+    }
+
+    selected = tone.id;
+    refreshInspector();
+    if (! playbackBox.isVisible() || ! pitchSlider.isVisible() || speedSlider.isVisible())
+    {
+        failureMessage = "Carousel tone inspector did not switch to sound controls";
+        return false;
+    }
+    selected = orbit.id;
+    refreshInspector();
+    if (! speedSlider.isVisible() || ! radiusSlider.isVisible() || playbackBox.isVisible())
+    {
+        failureMessage = "Carousel inspector did not switch to orbit controls";
+        return false;
+    }
+
+    for (const auto size : { juce::Point<int> { 1040, 700 }, juce::Point<int> { 820, 560 } })
+    {
+        setSize (size.x, size.y);
+        resized();
+        const auto bounds = getLocalBounds();
+        const std::array<juce::Component*, 7> compactControls {{ &selectButton, &playButton, &columnsBox,
+                                                                 &rowsBox, &selectionLabel, &detailLabel, &deleteButton }};
+        for (auto* component : compactControls)
+            if (component->isVisible() && ! bounds.contains (component->getBounds()))
+            {
+                failureMessage = "Carousel controls escaped a compact window";
+                return false;
+            }
+
+        juce::Image image (juce::Image::ARGB, size.x, size.y, true);
+        juce::Graphics graphics (image);
+        paint (graphics);
+        if (image.getPixelAt (size.x / 2, size.y / 2).getAlpha() == 0)
+        {
+            failureMessage = "Carousel compact layout rendered a blank workspace";
+            return false;
+        }
+    }
+    for (auto* button : { &selectButton, &toneButton, &orbitButton, &postButton, &plankButton })
+        if (button->getName().isEmpty() || button->getTooltip().isEmpty() || ! button->getWantsKeyboardFocus())
+        {
+            failureMessage = "Carousel tool is missing keyboard or accessibility metadata";
+            return false;
+        }
     return true;
 }

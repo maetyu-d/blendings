@@ -161,6 +161,13 @@ int main()
         std::cerr << attachmentFailure << '\n';
         return 1;
     }
+
+    juce::String visualFailure;
+    if (! editor.runVisualInteractionSmokeChecks (visualFailure))
+    {
+        std::cerr << visualFailure << std::endl;
+        return 1;
+    }
     if (! editor.runPerformanceSmokeChecks (performanceFailure))
     {
         std::cerr << performanceFailure << '\n';
