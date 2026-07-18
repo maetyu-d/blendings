@@ -2,6 +2,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "EmbeddedScAudioEngine.h"
+#include "MusicalObjectEditorComponent.h"
 #include "PipeWorkspaceComponent.h"
 
 #include <algorithm>
@@ -719,8 +720,8 @@ public:
     {
         const auto bounds = button.getLocalBounds().toFloat().reduced (1.0f);
         const auto active = button.getToggleState();
-        const auto rainbow = colourForButton (button.getButtonText());
-        auto fill = active ? rainbow.withAlpha (0.22f) : panel2.withAlpha (0.78f);
+        const auto accentColour = colourForButton (button.getButtonText());
+        auto fill = active ? selection.withAlpha (0.92f) : panel2.withAlpha (0.90f);
 
         if (shouldDrawButtonAsDown)
             fill = fill.brighter (0.12f);
@@ -729,16 +730,13 @@ public:
 
         g.setColour (fill);
         g.fillRoundedRectangle (bounds, 6.0f);
-        g.setColour (active ? rainbow.withAlpha (0.92f) : rainbow.withAlpha (0.26f));
-        g.drawRoundedRectangle (bounds, 6.0f, active ? 2.0f : 1.1f);
+        g.setColour (active ? selection.brighter (0.12f) : line.withAlpha (shouldDrawButtonAsHighlighted ? 0.90f : 0.58f));
+        g.drawRoundedRectangle (bounds, 6.0f, active ? 1.5f : 0.8f);
 
-        if (active)
+        if (! active && accentColour == danger)
         {
-            g.setColour (rainbow.withAlpha (0.16f));
-            g.fillEllipse (juce::Rectangle<float> (bounds.getX() + 8.0f,
-                                                   bounds.getCentreY() - 5.0f,
-                                                   10.0f,
-                                                   10.0f));
+            g.setColour (danger.withAlpha (0.10f));
+            g.fillRoundedRectangle (bounds.reduced (2.0f), 5.0f);
         }
     }
 
@@ -747,8 +745,8 @@ public:
                          bool,
                          bool) override
     {
-        g.setFont (juce::FontOptions (12.0f).withStyle ("Bold"));
-        g.setColour (button.getToggleState() ? colourForButton (button.getButtonText()).brighter (0.22f) : muted);
+        g.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
+        g.setColour (button.getToggleState() ? juce::Colours::white : ink.withAlpha (0.78f));
         g.drawFittedText (button.getButtonText(),
                           button.getLocalBounds().reduced (4, 2),
                           juce::Justification::centred,
@@ -757,21 +755,8 @@ public:
 
     static juce::Colour colourForButton (const juce::String& text)
     {
-        if (text == "SELECT") return mint;
-        if (text == "PIPE")  return lemon;
-        if (text == "TAP")   return aqua;
-        if (text == "DISC") return pink;
-        if (text == "DRAIN") return coral;
-        if (text == "ERASE") return lavender;
-        if (text == "PLAY")  return mint;
-        if (text == "STOP")  return coral;
-        if (text == "CLEAR") return lavender;
-        if (text == "Front") return lemon;
-        if (text == "Right") return aqua;
-        if (text == "Back") return pink;
-        if (text == "Left") return mint;
-        if (text == "Top") return sky;
-        if (text == "Bottom") return lavender;
+        const auto name = text.toUpperCase();
+        if (name == "STOP" || name == "CLEAR" || name == "ERASE") return danger;
         return accent;
     }
 
@@ -793,6 +778,7 @@ public:
     static inline const juce::Colour ink      { 0xffedf4ef };
     static inline const juce::Colour muted    { 0xff8d9b95 };
     static inline const juce::Colour accent   { 0xffffdd6d };
+    static inline const juce::Colour selection{ 0xff1687f8 };
     static inline const juce::Colour water    { 0xff58d8ff };
     static inline const juce::Colour danger   { 0xffff7f8a };
     static inline const juce::Colour mint     { 0xff8ef6a3 };
@@ -812,7 +798,7 @@ class PipeWorkspaceComponent final : public juce::AudioAppComponent,
                             private juce::ComboBox::Listener
 {
 public:
-    PipeWorkspaceComponent()
+    explicit PipeWorkspaceComponent (bool enableAudio = true)
     {
         setLookAndFeel (&lookAndFeel);
         setOpaque (true);
@@ -853,7 +839,7 @@ public:
         playbackBox.addItem ("Pure Data", 3);
         playbackBox.setSelectedId (1, juce::dontSendNotification);
         playbackBox.addListener (this);
-        playbackBox.setTooltip ("Choose what this Pipe World disc plays");
+        playbackBox.setTooltip ("Choose what this Pipe disc plays");
         addAndMakeVisible (playbackBox);
 
         scCodeDocument.replaceAllContent (defaultScProgram());
@@ -872,17 +858,19 @@ public:
         setupSlider (durationSlider, 0.05, 30.0, 0.05, 0.45);
         durationSlider.setTooltip ("One-shot duration in seconds");
 
-        setupButton (selectButton, "SELECT", "Inspect cells without changing the pipework");
-        setupButton (pipeButton, "PIPE", "Draw connected pipe paths");
-        setupButton (tapButton, "TAP", "Add or remove a water source");
-        setupButton (valveButton, "DISC", "Add or remove an OTHERWARE disc");
-        setupButton (drainButton, "DRAIN", "Add or remove a drain outlet");
-        setupButton (eraseButton, "ERASE", "Erase a pipe cell and its markers");
-        setupButton (playButton, "PLAY", "Start water flow");
-        setupButton (stopButton, "STOP", "Stop water flow");
-        setupButton (clearButton, "CLEAR", "Clear every pipe, tap, disc and drain");
+        setupButton (selectButton, "Select", "Inspect cells without changing the pipework");
+        setupButton (pipeButton, "Pipe", "Draw connected pipe paths");
+        setupButton (tapButton, "Tap", "Add or remove a water source");
+        setupButton (valveButton, "Disc", "Add or remove a Blendings disc");
+        setupButton (drainButton, "Drain", "Add or remove a drain outlet");
+        setupButton (eraseButton, "Erase", "Erase a pipe cell and its markers");
+        setupButton (playButton, "Play", "Start water flow");
+        setupButton (stopButton, "Stop", "Stop water flow");
+        setupButton (clearButton, "Clear", "Clear every pipe, tap, disc and drain");
         setupButton (noteDownButton, "NOTE -", "Lower the selected valve note");
         setupButton (noteUpButton, "NOTE +", "Raise the selected valve note");
+        setupButton (soundButton, "SOUND...", "Edit this disc's sound");
+        setupButton (auditionButton, "AUDITION", "Preview this disc");
         setupButton (compileScButton, "APPLY SC", "Compile the SuperCollider program for SC mode");
         setupButton (resetScButton, "RESET", "Reset the SuperCollider program");
         setupButton (loadScButton, "LOAD", "Load SuperCollider code from a file");
@@ -891,6 +879,8 @@ public:
         noteDownButton.setVisible (false);
         noteUpButton.setVisible (false);
         noteSlider.setVisible (false);
+        soundButton.setVisible (false);
+        auditionButton.setVisible (false);
         compileScButton.setVisible (false);
         resetScButton.setVisible (false);
         loadScButton.setVisible (false);
@@ -899,7 +889,8 @@ public:
         network.loadDemo();
         updateButtonStates();
         startTimerHz (60);
-        setAudioChannels (0, 2);
+        if (enableAudio)
+            setAudioChannels (0, 2);
     }
 
     ~PipeWorkspaceComponent() override
@@ -990,6 +981,146 @@ public:
     void setDiscTriggerCallback (std::function<void(const otherware::PipeWorkspaceDiscTrigger&)> callback)
     {
         onDiscTriggered = std::move (callback);
+    }
+    void setPdEditorCallback (otherware::PipeWorkspacePdEditorCallback callback)
+    {
+        onPdEditorRequested = std::move (callback);
+    }
+    void setScEditorCallback (otherware::PipeWorkspaceScEditorCallback callback)
+    {
+        onScEditorRequested = std::move (callback);
+    }
+
+    bool runSmokeChecks (juce::String& failure)
+    {
+        auto* root = new juce::DynamicObject();
+        root->setProperty ("version", 1);
+        root->setProperty ("size", gridSize);
+        root->setProperty ("tempo", 132.0);
+        root->setProperty ("face", 0);
+        root->setProperty ("layer", 0);
+
+        juce::Array<juce::var> valves;
+        const std::array<otherware::PipeWorkspaceDiscTrigger::PlaybackType, 3> modes {{
+            otherware::PipeWorkspaceDiscTrigger::PlaybackType::synth,
+            otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider,
+            otherware::PipeWorkspaceDiscTrigger::PlaybackType::pureData
+        }};
+        for (int i = 0; i < 3; ++i)
+        {
+            auto* valve = new juce::DynamicObject();
+            valve->setProperty ("x", i + 1);
+            valve->setProperty ("y", 1);
+            valve->setProperty ("z", 1);
+            valve->setProperty ("note", 60 + i);
+            valve->setProperty ("playback", (int) modes[(size_t) i]);
+            valve->setProperty ("duration", 0.25 + 0.1 * i);
+            valve->setProperty ("scProgram", "SynthDef(\\blendingsSmoke, { Out.ar(0, Silent.ar(2)) }).add;");
+            valve->setProperty ("pdPatch", "#N canvas 0 0 300 200 10;\n#X obj 20 20 r trigger;");
+            valves.add (valve);
+        }
+        root->setProperty ("valves", valves);
+
+        if (! loadPatchFromVar (juce::var (root)))
+        {
+            failure = "Could not load the Pipe World smoke state";
+            return false;
+        }
+
+        const auto roundTrip = createPatch();
+        const auto* savedValves = roundTrip.getProperty ("valves", {}).getArray();
+        if (savedValves == nullptr || savedValves->size() != 3
+            || (int) (*savedValves)[2].getProperty ("playback", -1) != 2
+            || (int) (*savedValves)[1].getProperty ("note", -1) != 61)
+        {
+            failure = "Pipe World state did not round-trip its disc sound settings";
+            return false;
+        }
+
+        updateInspectorControls();
+        resized();
+        if (! playbackBox.getBounds().isEmpty() || ! durationSlider.getBounds().isEmpty())
+        {
+            failure = "Pipe World sound controls escaped the visible layout";
+            return false;
+        }
+
+        auto pdEditorOpened = false;
+        setPdEditorCallback ([&pdEditorOpened] (const juce::String& patch, float duration,
+                                                otherware::PipeWorkspacePdCommit commit)
+        {
+            pdEditorOpened = patch.isNotEmpty() && duration > 0.0f;
+            commit (patch + "\n#X text 20 50 edited;", 1.25f);
+        });
+        if (! openPdEditorForValve ({ 3, 1, 1 }) || ! pdEditorOpened)
+        {
+            failure = "Pipe World Pd sound did not request the full editor";
+            return false;
+        }
+        const auto editedState = createPatch();
+        const auto* editedValves = editedState.getProperty ("valves", {}).getArray();
+        if (editedValves == nullptr
+            || ! (*editedValves)[2].getProperty ("pdPatch", {}).toString().contains ("edited")
+            || std::abs ((float) (*editedValves)[2].getProperty ("duration", 0.0f) - 1.25f) > 0.001f)
+        {
+            failure = "Pipe World did not save full Pd editor changes";
+            return false;
+        }
+
+        auto scEditorOpened = false;
+        setScEditorCallback ([&scEditorOpened] (const juce::String& source, float duration,
+                                                otherware::PipeWorkspaceScCommit commit)
+        {
+            scEditorOpened = source.isNotEmpty() && duration > 0.0f;
+            commit (source + "\n// edited", 1.5f);
+        });
+        if (! openScEditorForValve ({ 2, 1, 1 }) || ! scEditorOpened)
+        {
+            failure = "Pipe World SC sound did not request the full editor";
+            return false;
+        }
+        const auto scEditedState = createPatch();
+        const auto* scEditedValves = scEditedState.getProperty ("valves", {}).getArray();
+        if (scEditedValves == nullptr
+            || ! (*scEditedValves)[1].getProperty ("scProgram", {}).toString().contains ("edited")
+            || std::abs ((float) (*scEditedValves)[1].getProperty ("duration", 0.0f) - 1.5f) > 0.001f)
+        {
+            failure = "Pipe World did not save full SC editor changes";
+            return false;
+        }
+
+        std::vector<otherware::PipeWorkspaceDiscTrigger> received;
+        setDiscTriggerCallback ([&received] (const auto& trigger) { received.push_back (trigger); });
+        setWorkspaceRunning (true);
+        if (! playing)
+        {
+            failure = "Pipe World did not enter background playback";
+            return false;
+        }
+
+        Flow passingDrop;
+        passingDrop.segmentBeats = 0.5;
+        passingDrop.progress = 0.75;
+        passingDrop.accent = 1.0f;
+        for (int i = 0; i < 3; ++i)
+        {
+            passingDrop.position = { i + 1, 1, 1 };
+            triggerValve (passingDrop.position, passingDrop);
+        }
+        setWorkspaceRunning (false);
+
+        if (received.size() != 3
+            || received[0].playback != modes[0]
+            || received[1].playback != modes[1]
+            || received[2].playback != modes[2]
+            || received[1].source.isEmpty()
+            || received[2].source.isEmpty())
+        {
+            failure = "Pipe World flow striking did not dispatch every playback mode";
+            return false;
+        }
+
+        return true;
     }
 
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
@@ -1107,31 +1238,30 @@ public:
     {
         const auto layout = getLayout();
 
-        auto top = layout.top.reduced (14, 10);
-        top.removeFromLeft (154);
+        auto top = layout.top.reduced (14, 9);
+        top.removeFromLeft (188);
         tempoSlider.setBounds ({});
-        keyBox.setBounds (top.removeFromLeft (62));
+        keyBox.setBounds (top.removeFromLeft (68));
+        top.removeFromLeft (8);
+        scaleBox.setBounds (top.removeFromLeft (132));
+        top.removeFromLeft (18);
+        playButton.setBounds (top.removeFromLeft (70));
         top.removeFromLeft (6);
-        scaleBox.setBounds (top.removeFromLeft (116));
-        top.removeFromLeft (12);
-        playButton.setBounds (top.removeFromLeft (72));
-        top.removeFromLeft (6);
-        stopButton.setBounds (top.removeFromLeft (72));
-        top.removeFromLeft (6);
-        clearButton.setBounds (top.removeFromLeft (78));
+        stopButton.setBounds (top.removeFromLeft (70));
+        clearButton.setBounds (layout.top.reduced (14, 9).removeFromRight (70));
 
-        auto tools = layout.tools.reduced (10, 16);
-        selectButton.setBounds (tools.removeFromTop (48));
-        tools.removeFromTop (8);
-        pipeButton.setBounds (tools.removeFromTop (48));
-        tools.removeFromTop (8);
-        tapButton.setBounds (tools.removeFromTop (48));
-        tools.removeFromTop (8);
-        valveButton.setBounds (tools.removeFromTop (48));
-        tools.removeFromTop (8);
-        drainButton.setBounds (tools.removeFromTop (48));
-        tools.removeFromTop (8);
-        eraseButton.setBounds (tools.removeFromTop (48));
+        auto tools = layout.tools.reduced (8, 14);
+        selectButton.setBounds (tools.removeFromTop (42));
+        tools.removeFromTop (7);
+        pipeButton.setBounds (tools.removeFromTop (42));
+        tools.removeFromTop (7);
+        tapButton.setBounds (tools.removeFromTop (42));
+        tools.removeFromTop (7);
+        valveButton.setBounds (tools.removeFromTop (42));
+        tools.removeFromTop (7);
+        drainButton.setBounds (tools.removeFromTop (42));
+        tools.removeFromTop (14);
+        eraseButton.setBounds (tools.removeFromTop (42));
 
         auto nav = layout.preview.reduced (18, 20).toFloat();
         nav.removeFromTop (28.0f);
@@ -1140,9 +1270,9 @@ public:
         const auto reservedForControls = scMode
                                             ? (scViewMode == ScViewMode::large3D ? 250.0f
                                                                                   : scViewMode == ScViewMode::largeCode ? 500.0f : 430.0f)
-                                            : (large3DView ? 210.0f : 220.0f);
+                                            : (large3DView ? 290.0f : 300.0f);
         const auto cardSide = juce::jmin (nav.getWidth(),
-                                          juce::jmax (scMode ? 160.0f : 220.0f, nav.getHeight() - reservedForControls),
+                                          juce::jmax (scMode ? 160.0f : 180.0f, nav.getHeight() - reservedForControls),
                                           scMode ? (scViewMode == ScViewMode::large3D ? 520.0f
                                                                                       : scViewMode == ScViewMode::largeCode ? 190.0f : 250.0f)
                                                  : (large3DView ? 560.0f : 360.0f));
@@ -1178,15 +1308,15 @@ public:
         noteDownButton.setBounds (noteArea.removeFromLeft (noteW));
         noteArea.removeFromLeft (noteGap);
         noteUpButton.setBounds (noteArea);
+        soundButton.setBounds (noteDownButton.getBounds());
+        auditionButton.setBounds (noteUpButton.getBounds());
 
-        auto pitchArea = noteArea.withX ((int) card.getX()).withY (noteUpButton.getBottom() + 8).withWidth ((int) card.getWidth()).withHeight (42);
-        noteSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-        noteSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 24);
-        noteSlider.setBounds (pitchArea);
-        playbackBox.setBounds (pitchArea.withY (pitchArea.getBottom() + 8).withHeight (34));
-        durationSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-        durationSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 24);
-        durationSlider.setBounds (playbackBox.getBounds().withY (playbackBox.getBottom() + 8).withHeight (38));
+        // Sound editing now lives in the dedicated Sound callout/full editors.
+        // Keep the retired inline controls unlaid-out so state changes cannot
+        // expose them below the visible panel.
+        noteSlider.setBounds ({});
+        playbackBox.setBounds ({});
+        durationSlider.setBounds ({});
 
         if (scMode)
         {
@@ -1507,6 +1637,8 @@ private:
     juce::TextButton clearButton;
     juce::TextButton noteDownButton;
     juce::TextButton noteUpButton;
+    juce::TextButton soundButton;
+    juce::TextButton auditionButton;
     juce::TextButton compileScButton;
     juce::TextButton resetScButton;
     juce::TextButton loadScButton;
@@ -1556,6 +1688,10 @@ private:
     bool updatingNoteSlider = false;
     std::function<void()> onWorkspaceChanged;
     std::function<void(const otherware::PipeWorkspaceDiscTrigger&)> onDiscTriggered;
+    otherware::PipeWorkspacePdEditorCallback onPdEditorRequested;
+    otherware::PipeWorkspaceScEditorCallback onScEditorRequested;
+    std::optional<IVec3> activeValve;
+    double activeValveUntilMs = 0.0;
 
     static constexpr int savePatchMenuId = 9001;
     static constexpr int loadPatchMenuId = 9002;
@@ -1968,18 +2104,18 @@ private:
     {
         Layout layout;
         auto bounds = getLocalBounds();
-        layout.top = bounds.removeFromTop (64);
-        layout.footer = bounds.removeFromBottom (30);
+        layout.top = bounds.removeFromTop (58);
+        layout.footer = bounds.removeFromBottom (24);
         layout.content = bounds;
 
-        layout.tools = bounds.removeFromLeft (88);
+        layout.tools = bounds.removeFromLeft (74);
 
         const auto previewWidth = previewWidthFor (bounds.getWidth());
         layout.preview = bounds.removeFromRight (previewWidth);
         layout.editor = bounds;
 
-        auto gridArea = layout.editor.reduced (38, 40);
-        gridArea.removeFromTop (8);
+        auto gridArea = layout.editor.reduced (32, 30);
+        gridArea.removeFromTop (10);
         const auto side = juce::jmax (160, juce::jmin (gridArea.getWidth(), gridArea.getHeight()));
         layout.grid = juce::Rectangle<int> (side, side).withCentre (gridArea.getCentre());
 
@@ -1996,12 +2132,12 @@ private:
             if (scViewMode == ScViewMode::largeCode)
                 return juce::jlimit (560, 820, (int) std::round ((double) availableWidth * 0.50));
 
-            return juce::jlimit (440, 620, (int) std::round ((double) availableWidth * 0.38));
+            return juce::jlimit (390, 560, (int) std::round ((double) availableWidth * 0.36));
         }
 
         return large3DView
                 ? juce::jlimit (520, 780, (int) std::round ((double) availableWidth * 0.56))
-                : juce::jlimit (300, 420, availableWidth / 4);
+                : juce::jlimit (330, 410, availableWidth / 4);
     }
 
     void setMainView()
@@ -2392,12 +2528,13 @@ private:
     void updateInspectorControls()
     {
         const auto hasValve = selectedValve() != nullptr;
-        const auto showValveControls = hasValve;
-        noteDownButton.setVisible (showValveControls);
-        noteUpButton.setVisible (showValveControls);
-        noteSlider.setVisible (showValveControls);
-        playbackBox.setVisible (showValveControls);
-        durationSlider.setVisible (showValveControls);
+        noteDownButton.setVisible (false);
+        noteUpButton.setVisible (false);
+        noteSlider.setVisible (false);
+        playbackBox.setVisible (false);
+        durationSlider.setVisible (false);
+        soundButton.setVisible (hasValve);
+        auditionButton.setVisible (hasValve);
 
         updatingNoteSlider = true;
         if (const auto* valve = selectedValve())
@@ -2407,6 +2544,132 @@ private:
             durationSlider.setValue (valve->durationSeconds, juce::dontSendNotification);
         }
         updatingNoteSlider = false;
+    }
+
+    MusicalObjectSound soundForValve (const Valve& valve) const
+    {
+        MusicalObjectSound sound;
+        sound.playback = static_cast<MusicalObjectSound::Playback> ((int) valve.playback);
+        sound.midiNote = valve.midiNote;
+        sound.durationSeconds = valve.durationSeconds;
+        sound.scSource = scProgramForValve (valve);
+        sound.pdSource = valve.pdPatch.isNotEmpty() ? valve.pdPatch : defaultPdPatch();
+        return sound;
+    }
+
+    bool openPdEditorForValve (IVec3 position)
+    {
+        auto* valve = network.valveAt (position);
+        if (valve == nullptr || valve->playback != otherware::PipeWorkspaceDiscTrigger::PlaybackType::pureData
+            || onPdEditorRequested == nullptr)
+            return false;
+
+        const auto safeThis = juce::Component::SafePointer<PipeWorkspaceComponent> (this);
+        onPdEditorRequested (valve->pdPatch.isNotEmpty() ? valve->pdPatch : defaultPdPatch(),
+                             valve->durationSeconds,
+                             [safeThis, position] (const juce::String& patch, float duration)
+        {
+            if (safeThis == nullptr) return;
+            if (auto* target = safeThis->network.valveAt (position))
+            {
+                safeThis->beginChange();
+                target->pdPatch = patch;
+                target->durationSeconds = duration;
+                if (safeThis->onWorkspaceChanged) safeThis->onWorkspaceChanged();
+                safeThis->updateInspectorControls();
+                safeThis->repaint();
+            }
+        });
+        return true;
+    }
+
+    bool openScEditorForValve (IVec3 position)
+    {
+        auto* valve = network.valveAt (position);
+        if (valve == nullptr || valve->playback != otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider
+            || onScEditorRequested == nullptr)
+            return false;
+
+        const auto safeThis = juce::Component::SafePointer<PipeWorkspaceComponent> (this);
+        onScEditorRequested (scProgramForValve (*valve), valve->durationSeconds,
+                             [safeThis, position] (const juce::String& source, float duration)
+        {
+            if (safeThis == nullptr) return;
+            if (auto* target = safeThis->network.valveAt (position))
+            {
+                safeThis->beginChange();
+                target->scProgram = source;
+                target->scProgramLoaded = false;
+                target->durationSeconds = duration;
+                if (safeThis->onWorkspaceChanged) safeThis->onWorkspaceChanged();
+                safeThis->updateInspectorControls();
+                safeThis->repaint();
+            }
+        });
+        return true;
+    }
+
+    void openSelectedValveSoundEditor()
+    {
+        const auto* valve = selectedValve();
+        if (valve == nullptr) return;
+        const auto position = valve->position;
+        if (openScEditorForValve (position))
+            return;
+        if (openPdEditorForValve (position))
+            return;
+        auto editor = std::make_unique<MusicalObjectEditorComponent> (soundForValve (*valve));
+        auto editorRef = std::make_shared<juce::Component::SafePointer<MusicalObjectEditorComponent>> (editor.get());
+        auto externalEditorPending = std::make_shared<bool> (false);
+        const auto safeThis = juce::Component::SafePointer<PipeWorkspaceComponent> (this);
+        editor->onChange = [safeThis, position, editorRef, externalEditorPending] (const MusicalObjectSound& sound)
+        {
+            if (safeThis == nullptr) return;
+            if (auto* target = safeThis->network.valveAt (position))
+            {
+                safeThis->beginChange();
+                target->playback = static_cast<otherware::PipeWorkspaceDiscTrigger::PlaybackType> ((int) sound.playback);
+                target->midiNote = sound.midiNote;
+                target->durationSeconds = sound.durationSeconds;
+                target->scProgram = sound.scSource;
+                target->pdPatch = sound.pdSource;
+                target->scProgramLoaded = false;
+                if (safeThis->onWorkspaceChanged) safeThis->onWorkspaceChanged();
+                safeThis->updateInspectorControls();
+                safeThis->repaint();
+                const auto needsScEditor = target->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider;
+                const auto needsPdEditor = target->playback == otherware::PipeWorkspaceDiscTrigger::PlaybackType::pureData;
+                if ((needsScEditor || needsPdEditor) && ! *externalEditorPending)
+                {
+                    *externalEditorPending = true;
+                    juce::MessageManager::callAsync ([safeThis, position, editorRef, needsScEditor]
+                    {
+                        if (auto* editorComponent = editorRef->getComponent())
+                            if (auto* callout = editorComponent->findParentComponentOfClass<juce::CallOutBox>())
+                                callout->dismiss();
+
+                        if (safeThis == nullptr) return;
+                        if (needsScEditor) safeThis->openScEditorForValve (position);
+                        else               safeThis->openPdEditorForValve (position);
+                    });
+                }
+            }
+        };
+        editor->onPreview = [safeThis, position] (const MusicalObjectSound&)
+        {
+            if (safeThis != nullptr) safeThis->auditionValve (position);
+        };
+        juce::CallOutBox::launchAsynchronously (std::move (editor), soundButton.getScreenBounds(), this);
+    }
+
+    void auditionValve (IVec3 position)
+    {
+        if (network.valveAt (position) == nullptr) return;
+        Flow preview;
+        preview.position = position;
+        preview.segmentBeats = 0.5;
+        preview.accent = 1.0f;
+        triggerValve (position, preview);
     }
 
     void adjustSelectedValveNote (int semitones)
@@ -2852,6 +3115,9 @@ private:
 
     void triggerValve (IVec3 voxel, const Flow& flow)
     {
+        activeValve = voxel;
+        activeValveUntilMs = juce::Time::getMillisecondCounterHiRes() + 420.0;
+        repaint();
         auto* valve = network.valveAt (voxel);
         const auto rawMidiNote = valve != nullptr ? valve->midiNote : defaultMusicalNoteFor (voxel);
         const auto midiNote = noteInCurrentScale (rawMidiNote);
@@ -2927,23 +3193,22 @@ private:
         g.setColour (PipeLookAndFeel::panel);
         g.fillRect (layout.top);
 
-        g.setColour (PipeLookAndFeel::aqua.withAlpha (0.82f));
-        g.fillRect (layout.top.withHeight (3));
         g.setColour (PipeLookAndFeel::line.withAlpha (0.45f));
         g.drawHorizontalLine (layout.top.getBottom() - 1, 0.0f, (float) getWidth());
 
-        auto title = layout.top.reduced (16, 10).removeFromLeft (142);
+        auto title = layout.top.reduced (18, 9).removeFromLeft (166);
         g.setColour (PipeLookAndFeel::ink);
-        g.setFont (juce::FontOptions (17.0f).withStyle ("Bold"));
-        g.drawFittedText ("Pipe", title.removeFromTop (24), juce::Justification::centredLeft, 1);
-        g.setColour (PipeLookAndFeel::aqua);
-        g.setFont (juce::FontOptions (10.0f).withStyle ("Bold"));
-        g.drawFittedText ("3D flow workspace", title, juce::Justification::centredLeft, 1);
+        g.setFont (juce::FontOptions (16.0f).withStyle ("Bold"));
+        g.drawFittedText ("Pipe", title.removeFromTop (22), juce::Justification::centredLeft, 1);
+        g.setColour (PipeLookAndFeel::muted.withAlpha (0.78f));
+        g.setFont (juce::FontOptions (9.5f));
+        g.drawFittedText ("Flow sequencer", title, juce::Justification::centredLeft, 1);
 
-        g.setFont (juce::FontOptions (9.0f));
-        g.setColour (PipeLookAndFeel::muted.withAlpha (0.80f));
-        g.drawFittedText ("Key", keyBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
-        g.drawFittedText ("Scale", scaleBox.getBounds().translated (0, -18), juce::Justification::centredLeft, 1);
+        auto harmony = keyBox.getBounds().getUnion (scaleBox.getBounds()).expanded (7, 4).toFloat();
+        g.setColour (PipeLookAndFeel::bg.withAlpha (0.62f));
+        g.fillRoundedRectangle (harmony, 7.0f);
+        g.setColour (PipeLookAndFeel::line.withAlpha (0.48f));
+        g.drawRoundedRectangle (harmony, 7.0f, 0.8f);
     }
 
     void drawToolRail (juce::Graphics& g, const Layout& layout)
@@ -2952,6 +3217,10 @@ private:
         g.fillRect (layout.tools);
         g.setColour (PipeLookAndFeel::line.withAlpha (0.42f));
         g.drawVerticalLine (layout.tools.getRight() - 1, (float) layout.tools.getY(), (float) layout.tools.getBottom());
+
+        g.setColour (PipeLookAndFeel::line.withAlpha (0.46f));
+        const auto dividerY = eraseButton.getY() - 8;
+        g.drawHorizontalLine (dividerY, 12.0f, (float) layout.tools.getRight() - 12.0f);
     }
 
     void drawEditor (juce::Graphics& g, const Layout& layout)
@@ -2962,24 +3231,24 @@ private:
         const auto grid = layout.grid.toFloat();
         const auto cell = grid.getWidth() / (float) gridSize;
 
-        auto caption = juce::Rectangle<int> (layout.editor.getX() + 28,
-                                             layout.grid.getY() - 28,
-                                             juce::jmax (120, layout.grid.getX() - layout.editor.getX() - 44),
-                                             20);
-        g.setFont (juce::FontOptions (12.0f).withStyle ("Bold"));
-        g.setColour (PipeLookAndFeel::lemon);
-        g.drawFittedText (juce::String (faces[(size_t) selectedFace].name).toUpperCase()
-                            + " / LAYER " + juce::String (selectedDepth + 1).paddedLeft ('0', 2),
+        auto caption = juce::Rectangle<int> (layout.grid.getX(), layout.grid.getY() - 29,
+                                             layout.grid.getWidth(), 20);
+        g.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
+        g.setColour (PipeLookAndFeel::ink.withAlpha (0.84f));
+        g.drawFittedText (juce::String (faces[(size_t) selectedFace].name)
+                            + "  ·  Layer " + juce::String (selectedDepth + 1).paddedLeft ('0', 2),
                           caption,
                           juce::Justification::bottomLeft,
                           1);
 
         drawRulers (g, layout, cell);
 
-        g.setColour (PipeLookAndFeel::panel.withAlpha (0.82f));
-        g.fillRoundedRectangle (grid.expanded (10.0f), 18.0f);
-        g.setColour (juce::Colour (0xff17172b));
-        g.fillRoundedRectangle (grid, 12.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.20f));
+        g.fillRoundedRectangle (grid.expanded (8.0f).translated (0.0f, 2.0f), 10.0f);
+        g.setColour (PipeLookAndFeel::panel2.withAlpha (0.78f));
+        g.fillRoundedRectangle (grid.expanded (8.0f), 10.0f);
+        g.setColour (juce::Colour (0xff0a1411));
+        g.fillRoundedRectangle (grid, 6.0f);
 
         drawLayerGhosts (g, grid, cell);
 
@@ -3247,6 +3516,12 @@ private:
                 g.drawEllipse (discBounds.reduced (radius * 0.18f), 1.5f);
                 g.setColour (PipeLookAndFeel::bg.withAlpha (0.62f));
                 g.fillEllipse (discBounds.reduced (radius * 0.58f));
+                if (activeValve.has_value() && *activeValve == valve.position
+                    && activeValveUntilMs > juce::Time::getMillisecondCounterHiRes())
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.90f));
+                    g.drawEllipse (discBounds.expanded (radius * 0.78f), 3.0f);
+                }
             }
         }
 
@@ -3451,10 +3726,10 @@ private:
                             .withCentre ({ panel.getCentreX(), panel.getY() + cardSide * 0.5f });
         const auto area = card.reduced (30.0f, 28.0f);
 
-        g.setColour (PipeLookAndFeel::panel2.withAlpha (0.54f));
-        g.fillRoundedRectangle (card, 20.0f);
+        g.setColour (PipeLookAndFeel::panel2.withAlpha (0.62f));
+        g.fillRoundedRectangle (card, 10.0f);
         g.setColour (PipeLookAndFeel::line.withAlpha (0.32f));
-        g.drawRoundedRectangle (card, 20.0f, 1.0f);
+        g.drawRoundedRectangle (card, 10.0f, 0.8f);
 
         g.saveState();
         g.reduceClipRegion (card.toNearestInt());
@@ -3508,8 +3783,8 @@ private:
         g.restoreState();
 
         g.setFont (juce::FontOptions (11.0f).withStyle ("Bold"));
-        g.setColour (PipeLookAndFeel::mint);
-        g.drawFittedText ("3D - " + juce::String (faces[(size_t) selectedFace].name),
+        g.setColour (PipeLookAndFeel::ink.withAlpha (0.90f));
+        g.drawFittedText ("Overview  ·  " + juce::String (faces[(size_t) selectedFace].name),
                           titleArea.toNearestInt(),
                           juce::Justification::centredLeft,
                           1);
@@ -3524,7 +3799,7 @@ private:
                                                            card.getBottom() + 8.0f,
                                                            card.getWidth(),
                                                            14.0f);
-            g.setColour (PipeLookAndFeel::muted.withAlpha (0.82f));
+            g.setColour (PipeLookAndFeel::muted.withAlpha (0.72f));
             g.setFont (juce::FontOptions (9.0f).withStyle ("Bold"));
             g.drawFittedText ("FACE", faceLabel.toNearestInt(), juce::Justification::centredLeft, 1);
 
@@ -3532,7 +3807,7 @@ private:
                                                             card.getBottom() + 122.0f,
                                                             card.getWidth(),
                                                             14.0f);
-            g.setColour (PipeLookAndFeel::lemon);
+            g.setColour (PipeLookAndFeel::ink.withAlpha (0.72f));
             g.drawFittedText ("LAYER " + juce::String (selectedDepth + 1).paddedLeft ('0', 2),
                               layerLabel.toNearestInt(),
                               juce::Justification::centredLeft,
@@ -3651,6 +3926,12 @@ private:
             g.fillRoundedRectangle ({ point.x - 7.0f, point.y - 7.0f, 14.0f, 14.0f }, 3.0f);
             g.setColour (PipeLookAndFeel::pink);
             g.drawRoundedRectangle ({ point.x - 5.0f, point.y - 5.0f, 10.0f, 10.0f }, 3.0f, 1.6f);
+            if (activeValve.has_value() && *activeValve == valve.position
+                && activeValveUntilMs > juce::Time::getMillisecondCounterHiRes())
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.90f));
+                g.drawEllipse ({ point.x - 11.0f, point.y - 11.0f, 22.0f, 22.0f }, 2.5f);
+            }
         }
 
         for (const auto drain : network.drains)
@@ -3729,6 +4010,11 @@ private:
         else if (button == &stopButton)  setPlaying (false);
         else if (button == &noteDownButton) adjustSelectedValveNote (-1);
         else if (button == &noteUpButton)   adjustSelectedValveNote (1);
+        else if (button == &soundButton) openSelectedValveSoundEditor();
+        else if (button == &auditionButton)
+        {
+            if (const auto voxel = selectedVoxel()) auditionValve (*voxel);
+        }
         else if (button == &compileScButton) compileScProgram();
         else if (button == &resetScButton) resetScProgram();
         else if (button == &loadScButton) loadScProgram();
@@ -3867,5 +4153,23 @@ void setPipeWorkspaceDiscTriggerCallback (juce::Component& component,
 {
     if (auto* workspace = dynamic_cast<PipeWorkspaceComponent*> (&component))
         workspace->setDiscTriggerCallback (std::move (callback));
+}
+
+void setPipeWorkspacePdEditorCallback (juce::Component& component, PipeWorkspacePdEditorCallback callback)
+{
+    if (auto* workspace = dynamic_cast<PipeWorkspaceComponent*> (&component))
+        workspace->setPdEditorCallback (std::move (callback));
+}
+
+void setPipeWorkspaceScEditorCallback (juce::Component& component, PipeWorkspaceScEditorCallback callback)
+{
+    if (auto* workspace = dynamic_cast<PipeWorkspaceComponent*> (&component))
+        workspace->setScEditorCallback (std::move (callback));
+}
+
+bool runPipeWorkspaceSmokeChecks (juce::String& failureMessage)
+{
+    PipeWorkspaceComponent workspace (false);
+    return workspace.runSmokeChecks (failureMessage);
 }
 } // namespace otherware

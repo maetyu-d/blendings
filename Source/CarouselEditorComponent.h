@@ -4,12 +4,15 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <functional>
+#include <map>
 #include <set>
 #include <vector>
 
+#include "MusicalObjectEditorComponent.h"
+
 struct CarouselDocument
 {
-    enum class ItemType { tone, orbit, post };
+    enum class ItemType { tone, orbit, post, plank };
     enum class PlaybackType { synth = 0, superCollider, pureData };
     struct Item
     {
@@ -47,6 +50,10 @@ public:
     [[nodiscard]] bool isRunning() const noexcept { return running; }
     std::function<void(const CarouselDocument&)> onChange;
     std::function<void(const CarouselDocument::Item&)> onTone;
+    using SoundCommit = std::function<void (const juce::String&, float)>;
+    using SoundEditorRequest = std::function<void (const juce::String&, float, SoundCommit)>;
+    SoundEditorRequest onScEditorRequested;
+    SoundEditorRequest onPdEditorRequested;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -55,9 +62,10 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool keyPressed (const juce::KeyPress&) override;
+    bool openFullSoundEditor (int toneId);
 
 private:
-    enum class Tool { select, tone, orbit, post };
+    enum class Tool { select, tone, orbit, post, plank };
     CarouselDocument document;
     Tool tool = Tool::select;
     int selected = -1, dragged = -1;
@@ -66,10 +74,11 @@ private:
     float zoom = 1.0f;
     juce::Point<float> pan, panStart, mouseStart, dragOffset;
     std::set<juce::String> contacts;
+    std::map<int, double> activeToneUntilMs;
 
-    juce::TextButton selectButton { "select" }, toneButton { "tone" }, orbitButton { "orbit" }, postButton { "post" };
+    juce::TextButton selectButton { "select" }, toneButton { "tone" }, orbitButton { "orbit" }, postButton { "post" }, plankButton { "plank" };
     juce::TextButton playButton { "play" }, clearButton { "clear all" }, deleteButton { "delete" }, fitButton { "fit" };
-    juce::TextButton resetCodeButton { "Reset template" };
+    juce::TextButton resetCodeButton { "Reset template" }, soundButton { "Sound..." }, auditionButton { "Audition" };
     juce::Slider bpmSlider, pitchSlider, durationSlider, speedSlider, radiusSlider, countSlider;
     juce::ComboBox columnsBox, rowsBox, playbackBox;
     juce::TextEditor codeEditor;
@@ -85,10 +94,14 @@ private:
     void setTool (Tool);
     void deleteSelected();
     void arrangeOrbit (int orbitId);
+    void updatePlankGeometry (CarouselDocument::Item& plank);
+    void positionPlanksForOrbit (int orbitId);
+    void translateDependents (int parentId, float dx, float dy);
     int orbitToneCount (int orbitId) const;
     void setOrbitToneCount (int count);
     void triggerTone (const CarouselDocument::Item&);
     void resetSelectedToneCode();
+    void openSelectedToneSoundEditor();
     float cellSize() const;
     juce::Rectangle<float> fieldViewport() const;
     juce::Rectangle<float> gridBounds() const;

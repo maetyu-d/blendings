@@ -9141,18 +9141,38 @@ class ScCodeEditorPanel final : public juce::Component,
 public:
     using ChangeCallback = std::function<void()>;
     using TestCallback = std::function<juce::String()>;
+    using StandaloneChangeCallback = std::function<void (const juce::String&, float)>;
 
     ScCodeEditorPanel (RoadCanvas& canvasToUse,
                        RoadCanvas::DiscHandle handleToUse,
                        int codeIndexToUse,
                        ChangeCallback changeCallback,
                        TestCallback testCallback)
-        : canvas (canvasToUse),
+        : canvas (&canvasToUse),
           handle (std::move (handleToUse)),
           codeIndex (juce::jmax (0, codeIndexToUse)),
           onChange (std::move (changeCallback)),
           onTest (std::move (testCallback)),
           codeEditor (codeDocument, &tokeniser)
+    {
+        initialise();
+    }
+
+    ScCodeEditorPanel (juce::String code,
+                       float duration,
+                       StandaloneChangeCallback changeCallback,
+                       TestCallback testCallback)
+        : standaloneCode (std::move (code)),
+          standaloneDuration (duration),
+          onStandaloneChange (std::move (changeCallback)),
+          onTest (std::move (testCallback)),
+          codeEditor (codeDocument, &tokeniser)
+    {
+        initialise();
+    }
+
+private:
+    void initialise()
     {
         setOpaque (true);
         addAndMakeVisible (titleLabel);
@@ -9220,6 +9240,7 @@ public:
         codeDocument.addListener (this);
     }
 
+public:
     ~ScCodeEditorPanel() override
     {
         codeDocument.removeListener (this);
@@ -9300,10 +9321,12 @@ public:
 
     void refreshFromDisc()
     {
-        const auto info = canvas.getDiscScCodeInfo (handle, codeIndex);
+        const auto info = currentInfo();
         const auto enabled = info.valid;
 
-        titleLabel.setText (enabled ? "SC Code " + juce::String (codeIndex + 1) : "SC Code Removed",
+        titleLabel.setText (enabled ? (canvas != nullptr ? "SC Code " + juce::String (codeIndex + 1)
+                                                       : "Pipe SC Code")
+                                    : "SC Code Removed",
                             juce::dontSendNotification);
         durationLabel.setText (enabled ? durationLabelText (info.durationSeconds)
                                        : "This code block has been removed",
@@ -9332,10 +9355,13 @@ public:
     }
 
 private:
-    RoadCanvas& canvas;
+    RoadCanvas* canvas = nullptr;
     RoadCanvas::DiscHandle handle;
     int codeIndex = 0;
     ChangeCallback onChange;
+    juce::String standaloneCode;
+    float standaloneDuration = -1.0f;
+    StandaloneChangeCallback onStandaloneChange;
     TestCallback onTest;
     juce::Label titleLabel;
     juce::Label statusLabel;
@@ -9357,6 +9383,42 @@ private:
     juce::CodeEditorComponent codeEditor;
     float editorFontSize = 12.0f;
     bool suppressCallbacks = false;
+
+    RoadCanvas::ScCodeInfo currentInfo() const
+    {
+        if (canvas != nullptr)
+            return canvas->getDiscScCodeInfo (handle, codeIndex);
+
+        RoadCanvas::ScCodeInfo info;
+        info.valid = true;
+        info.code = standaloneCode;
+        info.durationSeconds = standaloneDuration;
+        info.index = 0;
+        info.count = 1;
+        return info;
+    }
+
+    bool setCurrentCode (const juce::String& code)
+    {
+        if (canvas != nullptr)
+            return canvas->setDiscScCode (handle, codeIndex, code);
+
+        standaloneCode = code;
+        if (onStandaloneChange != nullptr)
+            onStandaloneChange (standaloneCode, standaloneDuration);
+        return true;
+    }
+
+    bool setCurrentDuration (float duration)
+    {
+        if (canvas != nullptr)
+            return canvas->setDiscScDuration (handle, codeIndex, duration);
+
+        standaloneDuration = duration;
+        if (onStandaloneChange != nullptr)
+            onStandaloneChange (standaloneCode, standaloneDuration);
+        return true;
+    }
 
     void configureCodeEditor()
     {
@@ -9383,7 +9445,7 @@ private:
             return;
         }
 
-        if (canvas.setDiscScCode (handle, codeIndex, codeDocument.getAllContent()))
+        if (setCurrentCode (codeDocument.getAllContent()))
         {
             statusLabel.setText ("committed  /  " + getCodeStatsText(), juce::dontSendNotification);
             setFeedback ("Ready", juce::Colour (0xff9ff6a3));
@@ -9580,7 +9642,7 @@ private:
         if (suppressCallbacks)
             return;
 
-        if (canvas.setDiscScCode (handle, codeIndex, codeDocument.getAllContent()))
+        if (setCurrentCode (codeDocument.getAllContent()))
             notifyChanged();
 
         updateEditorStatus();
@@ -9594,7 +9656,7 @@ private:
 
         const auto duration = durationFromText (durationBox.getText());
 
-        if (canvas.setDiscScDuration (handle, codeIndex, duration))
+        if (setCurrentDuration (duration))
         {
             durationBox.setText (durationText (duration), false);
             durationLabel.setText (durationLabelText (duration), juce::dontSendNotification);
@@ -9749,6 +9811,7 @@ public:
     using ChangeCallback = std::function<void()>;
     using TestCallback = std::function<juce::String()>;
     using GuiTriggerCallback = std::function<juce::String (const juce::String&, const juce::String&, const juce::StringArray&, float, bool, const juce::String&)>;
+    using StandaloneChangeCallback = std::function<void (const juce::String&, float)>;
 
     PdPatchEditorPanel (RoadCanvas& canvasToUse,
                         RoadCanvas::DiscHandle handleToUse,
@@ -9757,7 +9820,7 @@ public:
                         TestCallback testCallback,
                         GuiTriggerCallback guiTriggerCallback,
                         ScDiscAudioEngine& audioEngineToUse)
-        : canvas (canvasToUse),
+        : canvas (&canvasToUse),
           audioEngine (audioEngineToUse),
           handle (std::move (handleToUse)),
           patchIndex (juce::jmax (0, patchIndexToUse)),
@@ -9771,6 +9834,29 @@ public:
                                          {},
                                          {},
                                          this))
+    {
+        initialise();
+    }
+
+    PdPatchEditorPanel (juce::String patch,
+                        float durationSeconds,
+                        StandaloneChangeCallback standaloneChange,
+                        TestCallback testCallback,
+                        GuiTriggerCallback guiTriggerCallback,
+                        ScDiscAudioEngine& audioEngineToUse)
+        : audioEngine (audioEngineToUse),
+          onTest (std::move (testCallback)),
+          onGuiTrigger (std::move (guiTriggerCallback)),
+          onStandaloneChange (std::move (standaloneChange)),
+          initialInfo (makeStandaloneInfo (std::move (patch), durationSeconds)),
+          standaloneInfo (initialInfo),
+          browser (createBrowserOptions (initialInfo.patch, {}, {}, {}, {}, this))
+    {
+        initialise();
+    }
+
+private:
+    void initialise()
     {
         setOpaque (true);
         addAndMakeVisible (titleLabel);
@@ -9803,7 +9889,7 @@ public:
 
         resetButton.onClick = [this]
         {
-            if (canvas.setDiscPdPatch (handle, patchIndex, defaultPdPatch(), {}))
+            if (setCurrentPatch (defaultPdPatch(), {}))
             {
                 reloadBrowser (defaultPdPatch());
                 loadProjectMetadataAsync();
@@ -9838,6 +9924,8 @@ public:
         loadProjectMetadataAsync();
         startTimerHz (8);
     }
+
+public:
 
     ~PdPatchEditorPanel() override
     {
@@ -9879,13 +9967,14 @@ public:
     }
 
 private:
-    RoadCanvas& canvas;
+    RoadCanvas* canvas = nullptr;
     ScDiscAudioEngine& audioEngine;
     RoadCanvas::DiscHandle handle;
     int patchIndex = 0;
     ChangeCallback onChange;
     TestCallback onTest;
     GuiTriggerCallback onGuiTrigger;
+    StandaloneChangeCallback onStandaloneChange;
     juce::Label titleLabel;
     juce::Label statusLabel;
     juce::Label durationLabel;
@@ -9895,6 +9984,7 @@ private:
     juce::TextButton resetButton;
     juce::TextButton testButton;
     RoadCanvas::PdPatchInfo initialInfo;
+    RoadCanvas::PdPatchInfo standaloneInfo;
     juce::WebBrowserComponent browser;
     std::unique_ptr<juce::FileChooser> fileChooser;
     bool suppressCallbacks = false;
@@ -9905,6 +9995,41 @@ private:
     std::map<juce::String, juce::String> monitorArrayAliases;
     std::uint64_t lastArraySnapshotHash = 0;
     bool hasArraySnapshotHash = false;
+
+    static RoadCanvas::PdPatchInfo makeStandaloneInfo (juce::String patch, float duration)
+    {
+        RoadCanvas::PdPatchInfo info;
+        info.valid = true;
+        info.patch = patch.isNotEmpty() ? std::move (patch) : defaultPdPatch();
+        info.durationSeconds = duration;
+        info.index = 0;
+        info.count = 1;
+        return info;
+    }
+
+    RoadCanvas::PdPatchInfo currentInfo() const
+    {
+        return canvas != nullptr ? canvas->getDiscPdPatchInfo (handle, patchIndex) : standaloneInfo;
+    }
+
+    bool setCurrentPatch (const juce::String& patch, const juce::String& searchPath = {})
+    {
+        if (canvas != nullptr)
+            return canvas->setDiscPdPatch (handle, patchIndex, patch, searchPath, searchPath.isNotEmpty());
+        standaloneInfo.patch = patch;
+        if (searchPath.isNotEmpty()) standaloneInfo.searchPath = searchPath;
+        if (onStandaloneChange) onStandaloneChange (standaloneInfo.patch, standaloneInfo.durationSeconds);
+        return true;
+    }
+
+    bool setCurrentDuration (float duration)
+    {
+        if (canvas != nullptr)
+            return canvas->setDiscPdDuration (handle, patchIndex, duration);
+        standaloneInfo.durationSeconds = duration;
+        if (onStandaloneChange) onStandaloneChange (standaloneInfo.patch, standaloneInfo.durationSeconds);
+        return true;
+    }
 
     static void addAbstractionNamesFromDirectory (juce::StringArray& names, const juce::File& directory)
     {
@@ -10360,7 +10485,7 @@ private:
 
     void refreshFromDisc()
     {
-        const auto info = canvas.getDiscPdPatchInfo (handle, patchIndex);
+        const auto info = currentInfo();
         const auto enabled = info.valid;
 
         titleLabel.setText (enabled ? "Pd Patch " + juce::String (patchIndex + 1) : "Pd Patch Removed",
@@ -10392,7 +10517,7 @@ private:
         {
             const auto patch = object->getProperty ("patch").toString();
 
-            if (canvas.setDiscPdPatch (handle, patchIndex, patch))
+            if (setCurrentPatch (patch))
                 notifyChanged();
         }
     }
@@ -10456,7 +10581,7 @@ private:
 
     void pollLiveArrays()
     {
-        const auto info = canvas.getDiscPdPatchInfo (handle, patchIndex);
+        const auto info = currentInfo();
         juce::StringArray resolvedNames;
         monitorArrayAliases.clear();
 
@@ -10523,7 +10648,7 @@ private:
 
     void refreshMessageSubscriptions (const juce::String& activePatch = {})
     {
-        const auto info = canvas.getDiscPdPatchInfo (handle, patchIndex);
+        const auto info = currentInfo();
         const auto patch = activePatch.trim().isNotEmpty() ? activePatch : info.patch;
         const auto dollarZero = info.valid ? audioEngine.getPdPatchDollarZero (patch, info.searchPath) : 0;
         juce::StringArray resolvedReceivers;
@@ -10566,7 +10691,7 @@ private:
         {
             const auto name = object->getProperty ("name").toString();
             const auto patch = object->getProperty ("patch").toString();
-            const auto info = canvas.getDiscPdPatchInfo (handle, patchIndex);
+            const auto info = currentInfo();
 
             if (! info.valid)
                 return;
@@ -10610,7 +10735,7 @@ private:
 
     void loadProjectMetadataAsync()
     {
-        const auto info = canvas.getDiscPdPatchInfo (handle, patchIndex);
+        const auto info = currentInfo();
         if (! info.valid)
             return;
 
@@ -10685,10 +10810,7 @@ private:
 
             const auto patch = file.loadFileAsString();
 
-            if (safeThis->canvas.setDiscPdPatch (safeThis->handle,
-                                                 safeThis->patchIndex,
-                                                 patch,
-                                                 file.getParentDirectory().getFullPathName()))
+            if (safeThis->setCurrentPatch (patch, file.getParentDirectory().getFullPathName()))
             {
                 safeThis->reloadBrowser (patch);
                 safeThis->loadProjectMetadataAsync();
@@ -10700,7 +10822,7 @@ private:
 
     void exportPatch()
     {
-        const auto info = canvas.getDiscPdPatchInfo (handle, patchIndex);
+        const auto info = currentInfo();
         if (! info.valid)
             return;
 
@@ -10725,7 +10847,7 @@ private:
             if (file.getFileExtension().isEmpty())
                 file = file.withFileExtension (".pd");
 
-            const auto current = safeThis->canvas.getDiscPdPatchInfo (safeThis->handle, safeThis->patchIndex);
+            const auto current = safeThis->currentInfo();
             if (! current.valid)
                 return;
 
@@ -10743,7 +10865,7 @@ private:
 
         const auto duration = durationFromText (durationBox.getText());
 
-        if (canvas.setDiscPdDuration (handle, patchIndex, duration))
+        if (setCurrentDuration (duration))
         {
             durationBox.setText (durationText (duration), false);
             durationLabel.setText (durationLabelText (duration), juce::dontSendNotification);
@@ -10928,7 +11050,9 @@ class CarouselEditorPanel final : public juce::Component
 {
 public:
     CarouselEditorPanel (RoadCanvas& canvasToUse, RoadCanvas::DiscHandle handleToUse, int indexToUse,
-                         ScDiscAudioEngine& audio, std::function<void()> changed)
+                         ScDiscAudioEngine& audio, std::function<void()> changed,
+                         CarouselEditorComponent::SoundEditorRequest scEditorRequest,
+                         CarouselEditorComponent::SoundEditorRequest pdEditorRequest)
         : canvas (canvasToUse), handle (std::move (handleToUse)), index (indexToUse), onChange (std::move (changed))
     {
         addAndMakeVisible (editor);
@@ -10938,6 +11062,8 @@ public:
             if (canvas.setDiscCarousel (handle, index, document) && onChange) onChange();
         };
         editor.onTone = [&audio] (const CarouselDocument::Item& tone) { triggerCarouselTone (audio, tone); };
+        editor.onScEditorRequested = std::move (scEditorRequest);
+        editor.onPdEditorRequested = std::move (pdEditorRequest);
     }
     ~CarouselEditorPanel() override { editor.setRunning (false); }
     void resized() override { editor.setBounds (getLocalBounds()); }
@@ -10976,6 +11102,7 @@ public:
         else
             centreWithSize (width, height);
 
+        fitToUsableDisplay();
         setVisible (true);
     }
 
@@ -10989,6 +11116,25 @@ public:
 
 private:
     CloseCallback onClose;
+
+    void fitToUsableDisplay()
+    {
+        const auto& displays = juce::Desktop::getInstance().getDisplays();
+        const auto* display = displays.getDisplayForRect (getBounds());
+        if (display == nullptr)
+            display = displays.getPrimaryDisplay();
+        if (display == nullptr)
+            return;
+
+        auto usable = display->userArea;
+        if (usable.isEmpty())
+            usable = display->totalArea;
+        usable = usable.reduced (12);
+
+        const auto fittedWidth = juce::jmin (getWidth(), usable.getWidth());
+        const auto fittedHeight = juce::jmin (getHeight(), usable.getHeight());
+        setBounds (juce::Rectangle<int> (fittedWidth, fittedHeight).withCentre (usable.getCentre()));
+    }
 };
 
 class ElementDotButton final : public juce::Button
@@ -11141,16 +11287,44 @@ private:
     float levels[2] {};
 };
 
-class DiscMixerPanel final : public juce::Component
+class DiscMixerPanel final : public juce::Component,
+                             private juce::Timer
 {
 public:
     DiscMixerPanel (RoadCanvas& canvasToUse, float initialMaster,
                     std::function<void(float)> masterChanged,
-                    std::function<void()> changed)
-        : canvas (canvasToUse), masterGain (initialMaster), onMasterChanged (std::move (masterChanged)), onChanged (std::move (changed))
+                    std::function<void()> changed,
+                    std::function<void()> startRecording,
+                    std::function<void()> stopRecording,
+                    std::function<bool()> recordingState,
+                    std::function<double()> recordingDuration)
+        : canvas (canvasToUse), masterGain (initialMaster), onMasterChanged (std::move (masterChanged)),
+          onChanged (std::move (changed)), onStartRecording (std::move (startRecording)),
+          onStopRecording (std::move (stopRecording)), isRecording (std::move (recordingState)),
+          recordingSeconds (std::move (recordingDuration))
     {
         setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        recordButton.setButtonText ("Record WAV");
+        recordButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff29332f));
+        recordButton.onClick = [this]
+        {
+            if (isRecording != nullptr && isRecording())
+            {
+                if (onStopRecording != nullptr) onStopRecording();
+            }
+            else if (onStartRecording != nullptr)
+            {
+                onStartRecording();
+            }
+        };
+        addAndMakeVisible (recordButton);
+        startTimerHz (8);
         setSize (920, 500);
+    }
+
+    void resized() override
+    {
+        recordButton.setBounds (getWidth() - 154, 20, 130, 34);
     }
 
     void paint (juce::Graphics& g) override
@@ -11161,6 +11335,15 @@ public:
         g.drawText ("Mixer", 24, 18, 180, 28, juce::Justification::centredLeft);
         g.setColour (juce::Colour (0xff87938d)); g.setFont (juce::FontOptions (11.0f));
         g.drawText (channels.empty() ? "Add discs to create channels" : juce::String (channels.size()) + " disc channels", 24, 45, 220, 20, juce::Justification::centredLeft);
+
+        if (isRecording != nullptr && isRecording())
+        {
+            g.setColour (juce::Colour (0xffff5b57));
+            g.fillEllipse ((float) getWidth() - 182.0f, 31.0f, 8.0f, 8.0f);
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.drawText (formatRecordingTime (recordingSeconds != nullptr ? recordingSeconds() : 0.0),
+                        getWidth() - 245, 20, 58, 34, juce::Justification::centredRight);
+        }
 
         for (int i = 0; i < static_cast<int> (channels.size()); ++i) drawStrip (g, i, channels[static_cast<size_t> (i)], false);
         RoadCanvas::MixerChannel master; master.name = "Stereo Out"; master.level = masterGain;
@@ -11197,6 +11380,22 @@ public:
     void mouseUp (const juce::MouseEvent&) override { activeStrip = -1; activeControl = Control::none; }
 
 private:
+    void timerCallback() override
+    {
+        const auto recording = isRecording != nullptr && isRecording();
+        recordButton.setButtonText (recording ? "Stop Recording" : "Record WAV");
+        recordButton.setColour (juce::TextButton::buttonColourId,
+                                recording ? juce::Colour (0xff7b2929) : juce::Colour (0xff29332f));
+        repaint (getWidth() - 260, 10, 250, 55);
+    }
+
+    static juce::String formatRecordingTime (double seconds)
+    {
+        const auto total = juce::jmax (0, juce::roundToInt (seconds));
+        return juce::String (total / 60).paddedLeft ('0', 2) + ":"
+             + juce::String (total % 60).paddedLeft ('0', 2);
+    }
+
     enum class Control { none, level, pan };
     static constexpr float stripWidth = 108.0f, stripGap = 12.0f, left = 24.0f, top = 82.0f;
     juce::Rectangle<float> stripBounds (int index) const { return { left + static_cast<float> (index) * (stripWidth + stripGap), top, stripWidth, static_cast<float> (getHeight()) - top - 24.0f }; }
@@ -11258,6 +11457,10 @@ private:
     void changed() { if (onChanged) onChanged(); }
     RoadCanvas& canvas; float masterGain = 1.0f; std::vector<RoadCanvas::MixerChannel> channels;
     std::function<void(float)> onMasterChanged; std::function<void()> onChanged;
+    std::function<void()> onStartRecording, onStopRecording;
+    std::function<bool()> isRecording;
+    std::function<double()> recordingSeconds;
+    juce::TextButton recordButton;
     int activeStrip = -1; Control activeControl = Control::none;
 };
 
@@ -11292,8 +11495,9 @@ public:
           scSheetDot (ElementDotButton::Kind::scSheet, 0, scSheetElementColour(), "SCsheet"),
           orcaGridDot (ElementDotButton::Kind::orcaGrid, 0, orcaGridElementColour(), "Orca grid"),
           carouselDot (ElementDotButton::Kind::carousel, 0, carouselElementColour(), "Carousel"),
-          pipeWorldDot (ElementDotButton::Kind::pipeWorld, 0, pipeElementColour(), "Pipe world")
+          pipeWorldDot (ElementDotButton::Kind::pipeWorld, 0, pipeElementColour(), "Pipe")
     {
+        recordingThread.startThread();
         setOpaque (true);
         setLookAndFeel (&minimalLookAndFeel);
 
@@ -11937,6 +12141,8 @@ public:
         for (const auto& identifier : midiInputIdentifiers)
             deviceManager.removeMidiInputDeviceCallback (identifier, this);
 
+        stopMasterRecording();
+        recordingThread.stopThread (2000);
         shutdownAudio();
         scAudio.setPdMidiOutputCallback ({});
         midiOutputs.clear();
@@ -11951,6 +12157,7 @@ public:
 
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
     {
+        recordingSampleRate.store (sampleRate);
         scAudio.prepare (sampleRate, samplesPerBlockExpected, 2, 2);
         juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer<MainComponent> (this)]
         {
@@ -11970,6 +12177,7 @@ public:
             scAudio.render (*bufferToFill.buffer, &scratchInput);
             bufferToFill.buffer->applyGain (masterGain.load());
             captureMasterLevels (*bufferToFill.buffer, 0, bufferToFill.numSamples);
+            writeMasterRecording (*bufferToFill.buffer, 0, bufferToFill.numSamples);
             return;
         }
 
@@ -11989,10 +12197,12 @@ public:
         for (int channel = 0; channel < bufferToFill.buffer->getNumChannels(); ++channel)
             bufferToFill.buffer->applyGain (channel, bufferToFill.startSample, bufferToFill.numSamples, masterGain.load());
         captureMasterLevels (*bufferToFill.buffer, bufferToFill.startSample, bufferToFill.numSamples);
+        writeMasterRecording (*bufferToFill.buffer, bufferToFill.startSample, bufferToFill.numSamples);
     }
 
     void releaseResources() override
     {
+        stopMasterRecording();
         scAudio.release();
         scratchAudio.setSize (0, 0);
         scratchInput.setSize (0, 0);
@@ -12280,6 +12490,8 @@ public:
             menu.addItem (menuSaveProject, "Save\tCmd+S");
             menu.addItem (menuSaveProjectAs, "Save As...\tShift+Cmd+S");
             menu.addSeparator();
+            menu.addItem (menuRecordWav, isMasterRecording() ? "Stop Recording" : "Record WAV...");
+            menu.addSeparator();
             menu.addItem (menuClose, "Close\tCmd+W");
         }
         else if (index == 1)
@@ -12324,6 +12536,14 @@ public:
         else if (itemId == menuOpenProject) openProject();
         else if (itemId == menuSaveProject) saveProject();
         else if (itemId == menuSaveProjectAs) saveProjectAs();
+        else if (itemId == menuRecordWav)
+        {
+            if (isMasterRecording())
+                stopMasterRecording();
+            else
+                chooseMasterRecordingFile();
+            menuItemsChanged();
+        }
         else if (itemId == menuClose) closeApplicationWindow();
         else if (itemId == menuUndo) { canvas.undo(); updateStatus(); }
         else if (itemId == menuCopy) canvas.copySelectedItems();
@@ -12496,7 +12716,7 @@ private:
         });
     }
 
-    enum { menuNewProject = 10001, menuOpenProject, menuSaveProject, menuSaveProjectAs, menuClose,
+    enum { menuNewProject = 10001, menuOpenProject, menuSaveProject, menuSaveProjectAs, menuRecordWav, menuClose,
            menuUndo, menuCopy, menuPaste, menuDuplicate, menuSaveAssembly, menuToggleBypass, menuClear, menuRainbowUi, menuMixer, menuClocks,
            menuDimOrbitElements, menuCompactDiscs, menuFlowDebug };
     static constexpr int menuAbout = 10100;
@@ -12638,6 +12858,15 @@ private:
     };
     std::vector<PendingElementChain> pendingElementChains;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
+    std::unique_ptr<juce::FileChooser> recordingFileChooser;
+    juce::TimeSliceThread recordingThread { "Master WAV recorder" };
+    juce::CriticalSection recordingLock;
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> threadedRecordingWriter;
+    juce::AudioFormatWriter::ThreadedWriter* activeRecordingWriter = nullptr;
+    std::atomic<bool> recordingActive { false };
+    std::atomic<double> recordingSampleRate { 0.0 };
+    std::atomic<double> recordingStartMs { 0.0 };
+    juce::File currentRecordingFile;
     juce::ScopedMessageBox projectPrompt;
     juce::File currentProjectFile;
     bool projectDirty = false;
@@ -13090,7 +13319,7 @@ private:
             orcaGridInfoLabel.setText ("none", juce::dontSendNotification);
             carouselLabel.setText ("Carousel", juce::dontSendNotification);
             carouselInfoLabel.setText ("none", juce::dontSendNotification);
-            pipeWorldLabel.setText ("Pipe world", juce::dontSendNotification);
+            pipeWorldLabel.setText ("Pipe", juce::dontSendNotification);
             pipeWorldInfoLabel.setText ("none", juce::dontSendNotification);
             selectedElement = {};
             triggerModeBox.setSelectedId (1, juce::dontSendNotification);
@@ -13148,7 +13377,7 @@ private:
                                    juce::dontSendNotification);
         carouselLabel.setText ("Carousel", juce::dontSendNotification);
         carouselInfoLabel.setText (info.hasCarousel ? juce::String (info.carouselCount) + " fields  /  " + juce::String (info.carouselItemCount) + " objects" : "none", juce::dontSendNotification);
-        pipeWorldLabel.setText ("Pipe world", juce::dontSendNotification);
+        pipeWorldLabel.setText ("Pipe", juce::dontSendNotification);
         pipeWorldInfoLabel.setText (info.hasPipeWorld ? juce::String (info.pipeWorldCount) + " worlds" : "none", juce::dontSendNotification);
 
         worldRemoveButton.setEnabled (info.hasNestedWorld);
@@ -13238,7 +13467,7 @@ private:
             addElementDots (ElementDotButton::Kind::scSheet, nextSignature.scSheets, scSheetElementColour(), "SCsheet");
             addElementDots (ElementDotButton::Kind::orcaGrid, nextSignature.orcaGrids, orcaGridElementColour(), "Orca grid");
             addElementDots (ElementDotButton::Kind::carousel, nextSignature.carousels, carouselElementColour(), "Carousel");
-            addElementDots (ElementDotButton::Kind::pipeWorld, nextSignature.pipeWorlds, pipeElementColour(), "Pipe world");
+            addElementDots (ElementDotButton::Kind::pipeWorld, nextSignature.pipeWorlds, pipeElementColour(), "Pipe");
         }
 
         resized();
@@ -13620,7 +13849,17 @@ private:
         { statusLabel.setText ("Add a Carousel to this disc first", juce::dontSendNotification); return; }
         const auto safeThis = juce::Component::SafePointer<MainComponent> (this);
         auto* panel = new CarouselEditorPanel (canvas, handle, index, scAudio, [safeThis]
-        { if (safeThis != nullptr) { safeThis->refreshDataPane(); safeThis->updateStatus(); } });
+        { if (safeThis != nullptr) { safeThis->refreshDataPane(); safeThis->updateStatus(); } },
+        [safeThis] (const juce::String& source, float duration, CarouselEditorComponent::SoundCommit commit)
+        {
+            if (safeThis != nullptr)
+                safeThis->openPipeWorldScEditor (source, duration, std::move (commit), "Carousel SC Code");
+        },
+        [safeThis] (const juce::String& patch, float duration, CarouselEditorComponent::SoundCommit commit)
+        {
+            if (safeThis != nullptr)
+                safeThis->openPipeWorldPdEditor (patch, duration, std::move (commit), "Carousel Pd Patch");
+        });
         carouselPanel = panel;
         carouselWindow = std::make_unique<FloatingEditorWindow> ("Disc Carousel", panel, this, 1040, 700, [safeThis]
         { if (safeThis != nullptr) { safeThis->stopPreviewAudio(); safeThis->carouselPanel = nullptr; safeThis->carouselWindow = nullptr; } });
@@ -13641,11 +13880,118 @@ private:
             {
                 if (safeThis == nullptr) return;
                 safeThis->markProjectDirty(); safeThis->refreshDataPane();
-            });
+            },
+            [safeThis] { if (safeThis != nullptr) safeThis->chooseMasterRecordingFile(); },
+            [safeThis]
+            {
+                if (safeThis == nullptr) return;
+                safeThis->stopMasterRecording();
+                safeThis->menuItemsChanged();
+            },
+            [safeThis] { return safeThis != nullptr && safeThis->isMasterRecording(); },
+            [safeThis] { return safeThis != nullptr ? safeThis->masterRecordingDuration() : 0.0; });
         const auto width = juce::jlimit (520, 1500, 80 + (static_cast<int> (canvas.getMixerChannels().size()) + 1) * 120);
         mixerWindow = std::make_unique<FloatingEditorWindow> ("Mixer", panel, this, width, 520, [safeThis]
         { if (safeThis != nullptr) safeThis->mixerWindow = nullptr; });
         mixerWindow->setResizeLimits (520, 420, 1800, 900);
+    }
+
+    void chooseMasterRecordingFile()
+    {
+        if (isMasterRecording())
+            return;
+
+        const auto folder = currentProjectFile.existsAsFile()
+                              ? currentProjectFile.getParentDirectory()
+                              : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+        const auto name = "Blendings " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S") + ".wav";
+        recordingFileChooser = std::make_unique<juce::FileChooser> ("Record Master Output",
+                                                                    folder.getChildFile (name), "*.wav");
+        const auto safeThis = juce::Component::SafePointer<MainComponent> (this);
+        recordingFileChooser->launchAsync (juce::FileBrowserComponent::saveMode
+                                            | juce::FileBrowserComponent::canSelectFiles
+                                            | juce::FileBrowserComponent::warnAboutOverwriting,
+                                            [safeThis] (const juce::FileChooser& chooser)
+        {
+            if (safeThis == nullptr) return;
+            const auto file = chooser.getResult().withFileExtension ("wav");
+            safeThis->recordingFileChooser = nullptr;
+            if (file != juce::File())
+            {
+                safeThis->startMasterRecording (file);
+                safeThis->menuItemsChanged();
+            }
+        });
+    }
+
+    void startMasterRecording (const juce::File& file)
+    {
+        stopMasterRecording();
+        const auto sampleRate = recordingSampleRate.load();
+        if (sampleRate <= 0.0)
+        {
+            statusLabel.setText ("Start audio before recording", juce::dontSendNotification);
+            return;
+        }
+
+        file.deleteFile();
+        std::unique_ptr<juce::OutputStream> stream = file.createOutputStream();
+        if (stream == nullptr)
+        {
+            statusLabel.setText ("Could not create recording", juce::dontSendNotification);
+            return;
+        }
+
+        juce::WavAudioFormat format;
+        const auto options = juce::AudioFormatWriterOptions()
+                                .withSampleRate (sampleRate)
+                                .withNumChannels (2)
+                                .withBitsPerSample (24);
+        auto writer = format.createWriterFor (stream, options);
+        if (writer == nullptr)
+        {
+            statusLabel.setText ("Could not start WAV writer", juce::dontSendNotification);
+            return;
+        }
+
+        const juce::ScopedLock lock (recordingLock);
+        threadedRecordingWriter = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (
+            writer.release(), recordingThread, 32768);
+        activeRecordingWriter = threadedRecordingWriter.get();
+        recordingStartMs.store (juce::Time::getMillisecondCounterHiRes());
+        recordingActive.store (true);
+        currentRecordingFile = file;
+        statusLabel.setText ("Recording master output", juce::dontSendNotification);
+    }
+
+    void stopMasterRecording()
+    {
+        const juce::ScopedLock lock (recordingLock);
+        recordingActive.store (false);
+        activeRecordingWriter = nullptr;
+        threadedRecordingWriter.reset();
+    }
+
+    bool isMasterRecording() const { return recordingActive.load(); }
+
+    double masterRecordingDuration() const
+    {
+        return isMasterRecording()
+                 ? (juce::Time::getMillisecondCounterHiRes() - recordingStartMs.load()) / 1000.0
+                 : 0.0;
+    }
+
+    void writeMasterRecording (const juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
+    {
+        const juce::ScopedTryLock lock (recordingLock);
+        if (! lock.isLocked() || activeRecordingWriter == nullptr || numSamples <= 0)
+            return;
+
+        const float* channels[2] {
+            buffer.getReadPointer (0, startSample),
+            buffer.getReadPointer (juce::jmin (1, buffer.getNumChannels() - 1), startSample)
+        };
+        activeRecordingWriter->write (channels, numSamples);
     }
 
     void refreshClockButton()
@@ -13679,7 +14025,7 @@ private:
         const auto index = selectedElement && selectedElement->kind == ElementDotButton::Kind::pipeWorld ? selectedElement->index : 0;
         if (! info.valid || ! juce::isPositiveAndBelow (index, info.pipeWorldCount))
         {
-            statusLabel.setText ("Add a Pipe world to this disc first", juce::dontSendNotification);
+            statusLabel.setText ("Add a Pipe element to this disc first", juce::dontSendNotification);
             return;
         }
 
@@ -13690,6 +14036,20 @@ private:
         otherware::setPipeWorkspaceDiscTriggerCallback (*pipeElementComponent, [safeThis = juce::Component::SafePointer<MainComponent> (this)] (const auto& disc)
         {
             if (safeThis != nullptr) triggerPipeWorldDisc (safeThis->scAudio, disc);
+        });
+        otherware::setPipeWorkspacePdEditorCallback (*pipeElementComponent,
+            [safeThis = juce::Component::SafePointer<MainComponent> (this)]
+            (const juce::String& patch, float duration, otherware::PipeWorkspacePdCommit commit)
+        {
+            if (safeThis != nullptr)
+                safeThis->openPipeWorldPdEditor (patch, duration, std::move (commit));
+        });
+        otherware::setPipeWorkspaceScEditorCallback (*pipeElementComponent,
+            [safeThis = juce::Component::SafePointer<MainComponent> (this)]
+            (const juce::String& source, float duration, otherware::PipeWorkspaceScCommit commit)
+        {
+            if (safeThis != nullptr)
+                safeThis->openPipeWorldScEditor (source, duration, std::move (commit));
         });
         otherware::setPipeWorkspaceTempo (*pipeElementComponent, globalTempoBpm);
         const auto savedState = canvas.getDiscPipeWorld (handle, index);
@@ -13702,7 +14062,7 @@ private:
             const auto state = otherware::createPipeWorkspaceState (*safeThis->pipeElementComponent);
             safeThis->canvas.setDiscPipeWorld (safeThis->pipeElementHandle, safeThis->pipeElementIndex, juce::JSON::toString (state, false));
         });
-        pipeElementWindow = std::make_unique<FloatingEditorWindow> ("Disc Pipe World", workspace.release(), this, 1180, 760, [safeThis]
+        pipeElementWindow = std::make_unique<FloatingEditorWindow> ("Disc Pipe", workspace.release(), this, 1180, 760, [safeThis]
         {
             if (safeThis == nullptr) return;
             if (safeThis->pipeElementComponent != nullptr)
@@ -13714,6 +14074,132 @@ private:
             safeThis->pipeElementWindow = nullptr;
         });
         pipeElementWindow->setResizeLimits (900, 620, 2200, 1600);
+    }
+
+    void openPipeWorldPdEditor (const juce::String& patch,
+                                float duration,
+                                otherware::PipeWorkspacePdCommit commit,
+                                const juce::String& windowTitle = "Pipe Pd Patch")
+    {
+        if (pdPatchWindow != nullptr)
+        {
+            juce::Process::makeForegroundProcess();
+            pdPatchWindow->toFront (true);
+            pdPatchWindow->grabKeyboardFocus();
+            return;
+        }
+
+        struct LiveDocument { juce::String patch; float duration = -1.0f; };
+        auto live = std::make_shared<LiveDocument>();
+        live->patch = patch;
+        live->duration = duration;
+        const auto safeThis = juce::Component::SafePointer<MainComponent> (this);
+        auto changed = [live, saveToPipeWorld = std::move (commit)] (const juce::String& newPatch, float newDuration)
+        {
+            live->patch = newPatch;
+            live->duration = newDuration;
+            if (saveToPipeWorld) saveToPipeWorld (newPatch, newDuration);
+        };
+        auto test = [safeThis, live]() -> juce::String
+        {
+            if (safeThis == nullptr) return {};
+            otherware::PipeWorkspaceDiscTrigger trigger;
+            trigger.playback = otherware::PipeWorkspaceDiscTrigger::PlaybackType::pureData;
+            trigger.durationSeconds = live->duration;
+            trigger.source = live->patch;
+            triggerPipeWorldDisc (safeThis->scAudio, trigger);
+            return "Test fired  /  " + safeThis->scAudio.getStatusText();
+        };
+        auto triggerGui = [safeThis, live] (const juce::String& receiver,
+                                             const juce::String& selector,
+                                             const juce::StringArray& atoms,
+                                             float value,
+                                             bool bangOnly,
+                                             const juce::String& triggerPatch) -> juce::String
+        {
+            if (safeThis == nullptr || receiver.trim().isEmpty()) return "No Pd receiver on this control";
+            const auto activePatch = triggerPatch.trim().isNotEmpty() ? triggerPatch : live->patch;
+            const auto sent = selector.trim().isNotEmpty()
+                            ? safeThis->scAudio.triggerPdMessage (activePatch, receiver, selector, atoms, live->duration, {})
+                            : safeThis->scAudio.triggerPdGui (activePatch, receiver, value, bangOnly, live->duration, {});
+            return sent ? "Sent " + receiver + "  /  " + safeThis->scAudio.getStatusText()
+                        : "Pd GUI send failed";
+        };
+
+        pdPatchWindow = std::make_unique<FloatingEditorWindow> (
+            windowTitle,
+            new PdPatchEditorPanel (patch, duration, std::move (changed), std::move (test), std::move (triggerGui), scAudio),
+            this, 1180, 780,
+            [safeThis]
+            {
+                if (safeThis == nullptr) return;
+                safeThis->stopPreviewAudio();
+                safeThis->pdPatchWindow = nullptr;
+            });
+        pdPatchWindow->setResizeLimits (900, 620, 2200, 1600);
+        juce::Process::makeForegroundProcess();
+        pdPatchWindow->toFront (true);
+        pdPatchWindow->grabKeyboardFocus();
+
+        const auto safePdWindow = juce::Component::SafePointer<FloatingEditorWindow> (pdPatchWindow.get());
+        juce::MessageManager::callAsync ([safePdWindow]
+        {
+            if (safePdWindow == nullptr) return;
+            juce::Process::makeForegroundProcess();
+            safePdWindow->toFront (true);
+            safePdWindow->grabKeyboardFocus();
+        });
+    }
+
+    void openPipeWorldScEditor (const juce::String& source,
+                                float duration,
+                                otherware::PipeWorkspaceScCommit commit,
+                                const juce::String& windowTitle = "Pipe SC Code")
+    {
+        if (scCodeWindow != nullptr)
+        {
+            juce::Process::makeForegroundProcess();
+            scCodeWindow->toFront (true);
+            scCodeWindow->grabKeyboardFocus();
+            return;
+        }
+
+        struct LiveDocument { juce::String source; float duration = -1.0f; };
+        auto live = std::make_shared<LiveDocument>();
+        live->source = source;
+        live->duration = duration;
+        const auto safeThis = juce::Component::SafePointer<MainComponent> (this);
+        auto changed = [live, saveToPipeWorld = std::move (commit)] (const juce::String& newSource, float newDuration)
+        {
+            live->source = newSource;
+            live->duration = newDuration;
+            if (saveToPipeWorld) saveToPipeWorld (newSource, newDuration);
+        };
+        auto test = [safeThis, live]() -> juce::String
+        {
+            if (safeThis == nullptr) return {};
+            otherware::PipeWorkspaceDiscTrigger trigger;
+            trigger.playback = otherware::PipeWorkspaceDiscTrigger::PlaybackType::superCollider;
+            trigger.durationSeconds = live->duration;
+            trigger.source = live->source;
+            triggerPipeWorldDisc (safeThis->scAudio, trigger);
+            return "Test fired  /  " + safeThis->scAudio.getStatusText();
+        };
+
+        scCodeWindow = std::make_unique<FloatingEditorWindow> (
+            windowTitle,
+            new ScCodeEditorPanel (source, duration, std::move (changed), std::move (test)),
+            this, 900, 650,
+            [safeThis]
+            {
+                if (safeThis == nullptr) return;
+                safeThis->stopPreviewAudio();
+                safeThis->scCodeWindow = nullptr;
+            });
+        scCodeWindow->setResizeLimits (720, 520, 2200, 1600);
+        juce::Process::makeForegroundProcess();
+        scCodeWindow->toFront (true);
+        scCodeWindow->grabKeyboardFocus();
     }
 
     void addElementToSelectedDisc()

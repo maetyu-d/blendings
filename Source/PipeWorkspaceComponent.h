@@ -24,4 +24,11 @@ void setPipeWorkspaceRunning (juce::Component& component, bool running);
 void setPipeWorkspaceChangeCallback (juce::Component& component, std::function<void()> callback);
 void setPipeWorkspaceDiscTriggerCallback (juce::Component& component,
                                           std::function<void(const PipeWorkspaceDiscTrigger&)> callback);
+using PipeWorkspacePdCommit = std::function<void (const juce::String&, float)>;
+using PipeWorkspacePdEditorCallback = std::function<void (const juce::String&, float, PipeWorkspacePdCommit)>;
+void setPipeWorkspacePdEditorCallback (juce::Component& component, PipeWorkspacePdEditorCallback callback);
+using PipeWorkspaceScCommit = std::function<void (const juce::String&, float)>;
+using PipeWorkspaceScEditorCallback = std::function<void (const juce::String&, float, PipeWorkspaceScCommit)>;
+void setPipeWorkspaceScEditorCallback (juce::Component& component, PipeWorkspaceScEditorCallback callback);
+bool runPipeWorkspaceSmokeChecks (juce::String& failureMessage);
 }

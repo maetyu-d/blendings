@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.4.0 LANGUAGES C CXX)
+project(Blendings VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -114,6 +114,8 @@ target_sources(Blendings PRIVATE
     Source/GridModel.cpp
     Source/GridModel.h
     Source/InternalEvent.h
+    Source/MusicalObjectEditorComponent.cpp
+    Source/MusicalObjectEditorComponent.h
     Source/PdAudioEngine.cpp
     Source/PdAudioEngine.h
     Source/PipeWorkspaceComponent.cpp
@@ -226,9 +228,37 @@ endif()
 add_executable(CarouselSmoke EXCLUDE_FROM_ALL
     Source/CarouselEditorComponent.cpp
     Source/CarouselEditorComponent.h
+    Source/MusicalObjectEditorComponent.cpp
+    Source/MusicalObjectEditorComponent.h
     Source/CarouselSmoke.cpp)
 target_compile_definitions(CarouselSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
 target_link_libraries(CarouselSmoke PRIVATE
+    juce::juce_gui_extra
+    juce::juce_data_structures
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags)
+
+add_executable(PipeWorkspaceSmoke EXCLUDE_FROM_ALL
+    Source/EmbeddedScAudioEngine.cpp
+    Source/EmbeddedScAudioEngine.h
+    Source/MusicalObjectEditorComponent.cpp
+    Source/MusicalObjectEditorComponent.h
+    Source/PipeWorkspaceComponent.cpp
+    Source/PipeWorkspaceComponent.h
+    Source/PipeWorkspaceSmoke.cpp)
+target_compile_definitions(PipeWorkspaceSmoke PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    GRIDCOLLIDER_ALCHEMY_SC_ROOT="${BLENDINGS_SC_ROOT}")
+if (EXISTS "${SUPERCOLLIDER_INCLUDE_ROOT}/server/SC_WorldOptions.h")
+    target_include_directories(PipeWorkspaceSmoke SYSTEM PRIVATE
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/common"
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/plugin_interface"
+        "${SUPERCOLLIDER_INCLUDE_ROOT}/server")
+    target_compile_definitions(PipeWorkspaceSmoke PRIVATE GRIDCOLLIDER_HAS_SC_HEADERS=1)
+endif()
+target_link_libraries(PipeWorkspaceSmoke PRIVATE
+    juce::juce_audio_utils
     juce::juce_gui_extra
     juce::juce_data_structures
     juce::juce_recommended_config_flags
