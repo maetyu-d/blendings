@@ -28,6 +28,14 @@ struct RoadRoute
     float getLength() const;
 };
 
+struct TriggerQuantizeRegion
+{
+    juce::Rectangle<float> bounds;
+    int quantizeChoice = 2; // 1/8 note
+    bool enabled = true;
+    juce::String id { juce::Uuid().toString() };
+};
+
 struct ScCodeElement
 {
     juce::String code = defaultScCode();

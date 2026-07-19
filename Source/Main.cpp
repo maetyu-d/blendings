@@ -214,6 +214,7 @@ public:
         teleport,
         filter,
         logic,
+        quantizeRegion,
         modulator,
         modConnect,
         fadeOrbits,
@@ -327,6 +328,17 @@ private:
                 // Reinforce the elbow so the square joint remains solid at small sizes.
                 g.fillRect (juce::Rectangle<float> (3.6f, 3.6f).withCentre ({ x1, y0 }));
                 g.fillRect (juce::Rectangle<float> (3.6f, 3.6f).withCentre ({ x1, y1 }));
+                break;
+            }
+
+            case Icon::quantizeRegion:
+            {
+                const auto box = area.reduced (2.0f);
+                g.drawRoundedRectangle (box, 2.5f, 1.8f);
+                g.drawVerticalLine (static_cast<int> (box.getX() + box.getWidth() * 0.5f), box.getY() + 2.0f, box.getBottom() - 2.0f);
+                g.drawHorizontalLine (static_cast<int> (box.getY() + box.getHeight() * 0.5f), box.getX() + 2.0f, box.getRight() - 2.0f);
+                g.setFont (juce::FontOptions (juce::jmax (8.0f, box.getHeight() * 0.42f), juce::Font::bold));
+                g.drawText ("Q", box, juce::Justification::centred);
                 break;
             }
 
@@ -854,6 +866,7 @@ public:
         teleport,
         filter,
         logic,
+        quantizeRegion,
         modulator,
         modConnect,
         edit,
@@ -991,6 +1004,19 @@ public:
     }
 #endif
 
+    int quantizeChoiceForDisc (int discIndex, int fallbackChoice) const
+    {
+        if (! worldPath.empty() || ! juce::isPositiveAndBelow (discIndex, static_cast<int> (rootDiscs.size())))
+            return fallbackChoice;
+
+        const auto centre = rootDiscs[static_cast<size_t> (discIndex)].centre;
+        for (auto region = rootQuantizeRegions.rbegin(); region != rootQuantizeRegions.rend(); ++region)
+            if (region->enabled && region->bounds.contains (centre))
+                return juce::jlimit (0, 5, region->quantizeChoice);
+
+        return fallbackChoice;
+    }
+
     struct ScCodeInfo
     {
         bool valid = false;
@@ -1079,6 +1105,8 @@ public:
     {
         if (modulationLayerVisible && newTool != Tool::select && newTool != Tool::modulator
             && newTool != Tool::modConnect && newTool != Tool::erase)
+            newTool = Tool::select;
+        if (newTool == Tool::quantizeRegion && (! worldPath.empty() || modulationLayerVisible))
             newTool = Tool::select;
         tool = newTool;
         if (tool != Tool::tap) selectedTap = -1;
@@ -2150,6 +2178,7 @@ public:
         pipeTeleports().clear();
         pipeFilters().clear();
         pipeLogics().clear();
+        if (worldPath.empty()) rootQuantizeRegions.clear();
         currentRoute.points.clear();
         selectedRoute = -1;
         selectedNode = -1;
@@ -2165,6 +2194,32 @@ public:
         g.addTransform (getViewTransform());
         if (modulationLayerVisible)
             g.beginTransparencyLayer (0.22f);
+
+        if (worldPath.empty() && ! modulationLayerVisible)
+        {
+            const auto drawRegion = [&] (juce::Rectangle<float> bounds, int choice, bool enabled, bool selected)
+            {
+                const auto colour = juce::Colour (0xffa76cff);
+                g.setColour (colour.withAlpha (enabled ? (selected ? 0.18f : 0.09f) : 0.035f));
+                g.fillRoundedRectangle (bounds, 5.0f);
+                g.setColour (colour.withAlpha (enabled ? (selected ? 0.92f : 0.55f) : 0.25f));
+                g.drawRoundedRectangle (bounds, 5.0f, selected ? 2.0f : 1.2f);
+                const auto label = quantizeChoiceLabel (choice);
+                auto badge = juce::Rectangle<float> (52.0f, 20.0f).withPosition (bounds.getX() + 7.0f, bounds.getY() + 7.0f);
+                g.setColour (colour.withAlpha (enabled ? 0.88f : 0.38f));
+                g.fillRoundedRectangle (badge, 4.0f);
+                g.setColour (juce::Colours::white.withAlpha (enabled ? 0.96f : 0.55f));
+                g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+                g.drawText (label, badge, juce::Justification::centred);
+            };
+            for (int i = 0; i < static_cast<int> (rootQuantizeRegions.size()); ++i)
+                drawRegion (rootQuantizeRegions[static_cast<size_t> (i)].bounds,
+                            rootQuantizeRegions[static_cast<size_t> (i)].quantizeChoice,
+                            rootQuantizeRegions[static_cast<size_t> (i)].enabled,
+                            i == selectedQuantizeRegion);
+            if (drawingQuantizeRegion)
+                drawRegion (normalisedRegionBounds (quantizeRegionStart, quantizeRegionCurrent), pendingQuantizeChoice, true, true);
+        }
 
         std::vector<RoutePaintItem> routePaintItems;
         routePaintItems.reserve (routes().size() + (currentRoute.isDrawable() ? 1u : 0u));
@@ -2587,6 +2642,15 @@ public:
             }
         }
 
+        if (tool == Tool::quantizeRegion && worldPath.empty())
+        {
+            resetSelection();
+            drawingQuantizeRegion = true;
+            quantizeRegionStart = quantizeRegionCurrent = snapEnabled ? snapToGrid (worldPosition) : worldPosition;
+            repaint();
+            return;
+        }
+
         if (tool == Tool::select)
         {
             selectedFlowPulse = -1;
@@ -2638,6 +2702,12 @@ public:
             selectedRoute = selectedDevice || selectedDisc >= 0 ? -1 : findNearestRoute (worldPosition, screenToleranceToWorld (12.0f));
             selectedNode = -1;
 
+            selectedQuantizeRegion = -1;
+            if (! selectedDevice && selectedDisc < 0 && selectedRoute < 0 && worldPath.empty())
+                for (int i = static_cast<int> (rootQuantizeRegions.size()) - 1; i >= 0; --i)
+                    if (rootQuantizeRegions[static_cast<size_t> (i)].bounds.contains (worldPosition))
+                    { selectedQuantizeRegion = i; break; }
+
             auto itemKey = -1;
             if (selectedRoute >= 0) itemKey = selectionKey (selectionRoute, selectedRoute);
             else if (selectedDisc >= 0) itemKey = selectionKey (selectionDisc, selectedDisc);
@@ -2650,6 +2720,15 @@ public:
             else if (selectedTeleport >= 0) itemKey = selectionKey (selectionTeleport, selectedTeleport);
             else if (selectedFilter >= 0) itemKey = selectionKey (selectionFilter, selectedFilter);
             else if (selectedLogic >= 0) itemKey = selectionKey (selectionLogic, selectedLogic);
+
+            if (selectedQuantizeRegion >= 0)
+            {
+                selectedItems.clear();
+                notifySelectionChanged();
+                repaint();
+                showQuantizeRegionMenu (selectedQuantizeRegion);
+                return;
+            }
 
             if (itemKey >= 0)
             {
@@ -3023,6 +3102,13 @@ public:
             return;
         }
 
+        if (tool == Tool::quantizeRegion && drawingQuantizeRegion)
+        {
+            quantizeRegionCurrent = snapEnabled ? snapToGrid (worldPosition) : worldPosition;
+            repaint();
+            return;
+        }
+
         if (tool == Tool::select && draggingSelection)
         {
             const auto current = snapToGrid (worldPosition);
@@ -3095,6 +3181,25 @@ public:
                 notifyChanged (false);
                 return;
             }
+            return;
+        }
+
+        if (tool == Tool::quantizeRegion && drawingQuantizeRegion)
+        {
+            drawingQuantizeRegion = false;
+            quantizeRegionCurrent = snapEnabled ? snapToGrid (screenToWorld (event.position)) : screenToWorld (event.position);
+            const auto bounds = normalisedRegionBounds (quantizeRegionStart, quantizeRegionCurrent);
+            if (bounds.getWidth() >= gridSize * 0.5f && bounds.getHeight() >= gridSize * 0.5f)
+            {
+                TriggerQuantizeRegion region;
+                region.bounds = bounds;
+                region.quantizeChoice = pendingQuantizeChoice;
+                rootQuantizeRegions.push_back (region);
+                selectedQuantizeRegion = static_cast<int> (rootQuantizeRegions.size()) - 1;
+                notifyChanged();
+                showQuantizeRegionMenu (selectedQuantizeRegion);
+            }
+            repaint();
             return;
         }
 
@@ -3332,6 +3437,8 @@ public:
             { pipeFilters().erase (pipeFilters().begin() + selectedFilter); selectedFilter = -1; notifyChanged(); repaint(); return true; }
             if (juce::isPositiveAndBelow (selectedLogic, static_cast<int> (pipeLogics().size())))
             { pipeLogics().erase (pipeLogics().begin() + selectedLogic); selectedLogic = -1; notifyChanged(); repaint(); return true; }
+            if (juce::isPositiveAndBelow (selectedQuantizeRegion, static_cast<int> (rootQuantizeRegions.size())))
+            { rootQuantizeRegions.erase (rootQuantizeRegions.begin() + selectedQuantizeRegion); selectedQuantizeRegion = -1; notifyChanged(); repaint(); return true; }
 
             if (selectedRoute >= 0 && selectedRoute < static_cast<int> (routes().size()))
             {
@@ -3371,6 +3478,7 @@ public:
         project.addChild (teleportsToValueTree (rootPipeTeleports), -1, nullptr);
         project.addChild (filtersToValueTree (rootPipeFilters), -1, nullptr);
         project.addChild (logicsToValueTree (rootPipeLogics), -1, nullptr);
+        project.addChild (quantizeRegionsToValueTree (rootQuantizeRegions), -1, nullptr);
         project.addChild (clocksToValueTree (sequencingClocks), -1, nullptr);
         project.addChild (modulationToValueTree (modulators, modulationConnections), -1, nullptr);
         project.addChild (assembliesToValueTree (savedAssemblies), -1, nullptr);
@@ -3394,6 +3502,7 @@ public:
         std::vector<PipeTeleport> newTeleports;
         std::vector<PipeFilter> newFilters;
         std::vector<PipeLogic> newLogics;
+        std::vector<TriggerQuantizeRegion> newQuantizeRegions;
         auto newClocks = defaultSequencingClocks();
         std::vector<Modulator> newModulators;
         std::vector<ModulationConnection> newModulationConnections;
@@ -3419,6 +3528,7 @@ public:
         recoverSection ("pipeTeleports", teleportsFromValueTree, newTeleports);
         recoverSection ("pipeFilters", filtersFromValueTree, newFilters);
         recoverSection ("pipeLogics", logicsFromValueTree, newLogics);
+        recoverSection ("quantizeRegions", quantizeRegionsFromValueTree, newQuantizeRegions);
         if (const auto section = project.getChildWithName ("sequencingClocks"); section.isValid()
             && ! clocksFromValueTree (section, newClocks))
         {
@@ -3528,6 +3638,7 @@ public:
         rootPipeTeleports = std::move (newTeleports);
         rootPipeFilters = std::move (newFilters);
         rootPipeLogics = std::move (newLogics);
+        rootQuantizeRegions = std::move (newQuantizeRegions);
         sequencingClocks = std::move (newClocks);
         modulators = std::move (newModulators);
         modulationConnections = std::move (newModulationConnections);
@@ -3557,6 +3668,7 @@ private:
     std::vector<PipeTeleport> rootPipeTeleports;
     std::vector<PipeFilter> rootPipeFilters;
     std::vector<PipeLogic> rootPipeLogics;
+    std::vector<TriggerQuantizeRegion> rootQuantizeRegions;
     std::vector<Modulator> modulators;
     std::vector<ModulationConnection> modulationConnections;
     struct ModulationSmoothState { double value = 0.0, beat = 0.0; bool initialised = false; };
@@ -3746,6 +3858,9 @@ private:
     std::vector<juce::ValueTree> undoStates;
     std::vector<juce::ValueTree> redoStates;
     bool drawing = false;
+    bool drawingQuantizeRegion = false;
+    juce::Point<float> quantizeRegionStart, quantizeRegionCurrent;
+    int pendingQuantizeChoice = 2;
     bool draggingNode = false;
     bool panning = false;
     int selectedRoute = -1;
@@ -3760,6 +3875,7 @@ private:
     int selectedTeleport = -1;
     int selectedFilter = -1;
     int selectedLogic = -1;
+    int selectedQuantizeRegion = -1;
     int selectedModulator = -1;
     int selectedModulationConnection = -1;
     int connectingModulator = -1;
@@ -4145,6 +4261,48 @@ private:
             logic.enabled = static_cast<bool> (child.getProperty ("enabled", true));
             logic.id = child.getProperty ("id", logic.id).toString();
             destination.push_back (logic);
+        }
+        return true;
+    }
+
+    static juce::ValueTree quantizeRegionsToValueTree (const std::vector<TriggerQuantizeRegion>& source)
+    {
+        juce::ValueTree tree ("quantizeRegions");
+        for (const auto& region : source)
+        {
+            juce::ValueTree child ("region");
+            child.setProperty ("x", region.bounds.getX(), nullptr);
+            child.setProperty ("y", region.bounds.getY(), nullptr);
+            child.setProperty ("width", region.bounds.getWidth(), nullptr);
+            child.setProperty ("height", region.bounds.getHeight(), nullptr);
+            child.setProperty ("choice", juce::jlimit (0, 5, region.quantizeChoice), nullptr);
+            child.setProperty ("enabled", region.enabled, nullptr);
+            child.setProperty ("id", region.id, nullptr);
+            tree.addChild (child, -1, nullptr);
+        }
+        return tree;
+    }
+
+    static bool quantizeRegionsFromValueTree (const juce::ValueTree& tree, std::vector<TriggerQuantizeRegion>& destination)
+    {
+        if (! tree.hasType ("quantizeRegions")) return false;
+        destination.clear();
+        for (const auto& child : tree)
+        {
+            if (! child.hasType ("region")) continue;
+            TriggerQuantizeRegion region;
+            region.bounds = { static_cast<float> (child.getProperty ("x", 0.0)),
+                              static_cast<float> (child.getProperty ("y", 0.0)),
+                              static_cast<float> (child.getProperty ("width", 0.0)),
+                              static_cast<float> (child.getProperty ("height", 0.0)) };
+            region.quantizeChoice = juce::jlimit (0, 5, static_cast<int> (child.getProperty ("choice", 2)));
+            region.enabled = static_cast<bool> (child.getProperty ("enabled", true));
+            region.id = child.getProperty ("id", juce::Uuid().toString()).toString();
+            if (! std::isfinite (region.bounds.getX()) || ! std::isfinite (region.bounds.getY())
+                || ! std::isfinite (region.bounds.getWidth()) || ! std::isfinite (region.bounds.getHeight())
+                || region.bounds.getWidth() <= 0.0f || region.bounds.getHeight() <= 0.0f)
+                return false;
+            destination.push_back (std::move (region));
         }
         return true;
     }
@@ -4739,6 +4897,7 @@ private:
         selectedTeleport = -1;
         selectedFilter = -1;
         selectedLogic = -1;
+        selectedQuantizeRegion = -1;
         selectedModulator = -1;
         selectedModulationConnection = -1;
         selectedItems.clear();
@@ -4746,8 +4905,53 @@ private:
         draggingModulator = false;
         draggingNode = false;
         drawing = false;
+        drawingQuantizeRegion = false;
         currentRoute.points.clear();
         notifySelectionChanged();
+    }
+
+    static juce::String quantizeChoiceLabel (int choice)
+    {
+        static const juce::StringArray labels { "None", "1/16", "1/8", "1/4", "1/2", "1 bar" };
+        return labels[juce::jlimit (0, labels.size() - 1, choice)];
+    }
+
+    static juce::Rectangle<float> normalisedRegionBounds (juce::Point<float> a, juce::Point<float> b)
+    {
+        return juce::Rectangle<float>::leftTopRightBottom (juce::jmin (a.x, b.x), juce::jmin (a.y, b.y),
+                                                           juce::jmax (a.x, b.x), juce::jmax (a.y, b.y));
+    }
+
+    void showQuantizeRegionMenu (int index)
+    {
+        if (! juce::isPositiveAndBelow (index, static_cast<int> (rootQuantizeRegions.size()))) return;
+        juce::PopupMenu menu;
+        const auto current = rootQuantizeRegions[static_cast<size_t> (index)].quantizeChoice;
+        for (int choice = 0; choice <= 5; ++choice)
+            menu.addItem (choice + 1, quantizeChoiceLabel (choice), true, choice == current);
+        menu.addSeparator();
+        menu.addItem (20, rootQuantizeRegions[static_cast<size_t> (index)].enabled ? "Disable area" : "Enable area");
+        menu.addItem (21, "Delete area");
+        const auto safeThis = juce::Component::SafePointer<RoadCanvas> (this);
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safeThis, index] (int result)
+        {
+            if (safeThis == nullptr || ! juce::isPositiveAndBelow (index, static_cast<int> (safeThis->rootQuantizeRegions.size()))) return;
+            if (result >= 1 && result <= 6)
+            {
+                safeThis->rootQuantizeRegions[static_cast<size_t> (index)].quantizeChoice = result - 1;
+                safeThis->pendingQuantizeChoice = result - 1;
+            }
+            else if (result == 20)
+                safeThis->rootQuantizeRegions[static_cast<size_t> (index)].enabled = ! safeThis->rootQuantizeRegions[static_cast<size_t> (index)].enabled;
+            else if (result == 21)
+            {
+                safeThis->rootQuantizeRegions.erase (safeThis->rootQuantizeRegions.begin() + index);
+                safeThis->selectedQuantizeRegion = -1;
+            }
+            else return;
+            safeThis->notifyChanged();
+            safeThis->repaint();
+        });
     }
 
     void notifySelectionChanged()
@@ -10472,6 +10676,7 @@ public:
           teleportButton (IconButton::Icon::teleport, "Teleport"),
           filterButton (IconButton::Icon::filter, "Speed filter"),
           logicButton (IconButton::Icon::logic, "Logic"),
+          quantizeRegionButton (IconButton::Icon::quantizeRegion, "Local quantisation area"),
           modulatorButton (IconButton::Icon::modulator, "Place modulator"),
           modConnectButton (IconButton::Icon::modConnect, "Connect modulation"),
           nestedWorldDot (ElementDotButton::Kind::nestedWorld, 0, worldElementColour(), "Nested world"),
@@ -10505,12 +10710,13 @@ public:
         addAndMakeVisible (teleportButton);
         addAndMakeVisible (filterButton);
         addAndMakeVisible (logicButton);
+        addAndMakeVisible (quantizeRegionButton);
         addAndMakeVisible (modulatorButton);
         addAndMakeVisible (modConnectButton);
 
         for (auto* button : { &selectButton, &drawButton, &warpPipeButton, &editButton, &discButton,
                               &tapButton, &drainButton, &cloneButton, &speedLimitButton, &waitButton, &strikeButton, &teleportButton,
-                              &filterButton, &logicButton, &modulatorButton, &modConnectButton, &eraseButton })
+                              &filterButton, &logicButton, &quantizeRegionButton, &modulatorButton, &modConnectButton, &eraseButton })
             button->setIconScale (1.5f);
 
         addAndMakeVisible (flowButton);
@@ -10628,6 +10834,7 @@ public:
         teleportButton.setRadioGroupId (1001);
         filterButton.setRadioGroupId (1001);
         logicButton.setRadioGroupId (1001);
+        quantizeRegionButton.setRadioGroupId (1001);
         modulatorButton.setRadioGroupId (1001);
         modConnectButton.setRadioGroupId (1001);
         selectButton.setClickingTogglesState (true);
@@ -10645,6 +10852,7 @@ public:
         teleportButton.setClickingTogglesState (true);
         filterButton.setClickingTogglesState (true);
         logicButton.setClickingTogglesState (true);
+        quantizeRegionButton.setClickingTogglesState (true);
         modulatorButton.setClickingTogglesState (true);
         modConnectButton.setClickingTogglesState (true);
         selectButton.setToggleState (true, juce::dontSendNotification);
@@ -10673,6 +10881,8 @@ public:
         teleportButton.onClick = [this] { setTool (RoadCanvas::Tool::teleport); };
         filterButton.setTooltip ("Filter passing drops by their current speed");
         filterButton.onClick = [this] { setTool (RoadCanvas::Tool::filter); };
+        quantizeRegionButton.setTooltip ("Drag an area with its own disc-trigger quantisation");
+        quantizeRegionButton.onClick = [this] { setTool (RoadCanvas::Tool::quantizeRegion); };
         logicButton.setTooltip ("Place a gate, counter, switch, comparison or drop rule");
         logicButton.onClick = [this] { setTool (RoadCanvas::Tool::logic); };
         modulatorButton.setTooltip ("Place a transport-synchronised modulation source");
@@ -11512,7 +11722,7 @@ public:
         constexpr int toolPanelPadding = 8;
         constexpr int toolGap = 5;
         const auto modulationLayer = canvas.isModulationLayerVisible();
-        const auto toolCount = modulationLayer ? 4 : 15;
+        const auto toolCount = modulationLayer ? 4 : 16;
         constexpr int snapSectionGap = 13;
         const auto toolPanelHeight = toolPanelPadding * 2 + buttonSize * (toolCount + 1)
                                    + toolGap * (toolCount - 1) + snapSectionGap;
@@ -11537,6 +11747,7 @@ public:
             placeTool (warpPipeButton);
             placeTool (editButton);
             placeTool (discButton);
+            placeTool (quantizeRegionButton);
             placeTool (tapButton);
             placeTool (drainButton);
             placeTool (cloneButton);
@@ -11881,6 +12092,7 @@ private:
         }};
         for (size_t i = 0; i < tools.size(); ++i)
             tools[i]->setAccent (rainbowMode ? juce::Colour (rainbowAccents[i]) : accentColour());
+        quantizeRegionButton.setAccent (rainbowMode ? juce::Colour (0xffb000ff) : accentColour());
         modulatorButton.setAccent (rainbowMode ? juce::Colour (0xffa100ff) : accentColour());
         modConnectButton.setAccent (rainbowMode ? juce::Colour (0xff00b8d9) : accentColour());
         layersMainButton.setColour (juce::TextButton::buttonOnColourId, accentColour());
@@ -11947,6 +12159,7 @@ private:
     IconButton teleportButton;
     IconButton filterButton;
     IconButton logicButton;
+    IconButton quantizeRegionButton;
     IconButton modulatorButton;
     IconButton modConnectButton;
     juce::TextButton flowButton;
@@ -12255,9 +12468,9 @@ private:
     void refreshToolVisibility()
     {
         const auto modulation = canvas.isModulationLayerVisible();
-        for (auto* component : std::array<juce::Component*, 13> {
+        for (auto* component : std::array<juce::Component*, 14> {
                  &drawButton, &warpPipeButton, &editButton, &discButton, &tapButton, &drainButton, &cloneButton,
-                 &speedLimitButton, &waitButton, &strikeButton, &teleportButton, &filterButton, &logicButton })
+                 &speedLimitButton, &waitButton, &strikeButton, &teleportButton, &filterButton, &logicButton, &quantizeRegionButton })
             component->setVisible (! modulation);
         modulatorButton.setVisible (modulation);
         modConnectButton.setVisible (modulation);
@@ -12343,7 +12556,8 @@ private:
     void scheduleDiscTrigger (int discIndex)
     {
         static constexpr std::array<double, 6> quantizeBeats { 0.0, 0.25, 0.5, 1.0, 2.0, 4.0 };
-        const auto interval = quantizeBeats[static_cast<size_t> (juce::jlimit (0, 5, triggerQuantizeChoice))];
+        const auto localChoice = canvas.quantizeChoiceForDisc (discIndex, triggerQuantizeChoice);
+        const auto interval = quantizeBeats[static_cast<size_t> (juce::jlimit (0, 5, localChoice))];
         if (interval <= 0.0) { fireFlowDiscNow (discIndex); return; }
         const auto beat = currentTransportBeat();
         const auto boundary = std::ceil ((beat - 0.0001) / interval) * interval;
@@ -14179,7 +14393,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.7.3"; }
+    const juce::String getApplicationVersion() override    { return "0.7.7"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String& commandLine) override
@@ -14331,12 +14545,30 @@ int main (int argc, char** argv)
         return 4;
     }
 
-    const auto savedState = canvas.projectStateForTesting();
+    auto savedState = canvas.projectStateForTesting();
+    if (auto regions = savedState.getChildWithName ("quantizeRegions"); regions.isValid())
+    {
+        const auto firstDisc = savedState.getChildWithName ("discs").getChild (0);
+        juce::ValueTree region ("region");
+        region.setProperty ("x", static_cast<float> (firstDisc.getProperty ("x", 0.0f)) - 20.0f, nullptr);
+        region.setProperty ("y", static_cast<float> (firstDisc.getProperty ("y", 0.0f)) - 20.0f, nullptr);
+        region.setProperty ("width", 40.0f, nullptr);
+        region.setProperty ("height", 40.0f, nullptr);
+        region.setProperty ("choice", 2, nullptr);
+        region.setProperty ("enabled", true, nullptr);
+        region.setProperty ("id", "quantize-smoke-region", nullptr);
+        regions.addChild (region, -1, nullptr);
+    }
     RoadCanvas roundTripCanvas;
     if (! roundTripCanvas.applyProjectState (savedState.createCopy()))
     {
         std::fprintf (stderr, "Playback smoke: project state did not reload\n");
         return 6;
+    }
+    if (roundTripCanvas.quantizeChoiceForDisc (0, 0) != 2)
+    {
+        std::fprintf (stderr, "Playback smoke: local quantisation area was not restored or applied\n");
+        return 5;
     }
     const auto firstXml = savedState.createXml();
     const auto secondXml = roundTripCanvas.projectStateForTesting().createXml();
