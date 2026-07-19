@@ -10731,6 +10731,8 @@ public:
         addAndMakeVisible (triggerQuantizeSlider);
         addAndMakeVisible (clockButton);
         addAndMakeVisible (statusLabel);
+        addAndMakeVisible (masterVolumeLabel);
+        addAndMakeVisible (masterVolumeSlider);
         addAndMakeVisible (masterMeter);
         addChildComponent (audioDiagnosticsPanel);
         addChildComponent (performanceDiagnosticsPanel);
@@ -11148,6 +11150,27 @@ public:
         clockButton.onClick = [this] { openClockSettings(); };
         refreshClockButton();
 
+        masterVolumeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+        masterVolumeSlider.setRange (0.0, 1.5, 0.01);
+        masterVolumeSlider.setValue (masterGain.load(), juce::dontSendNotification);
+        masterVolumeSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        masterVolumeSlider.setDoubleClickReturnValue (true, 1.0);
+        masterVolumeSlider.setColour (juce::Slider::backgroundColourId, juce::Colour (0xff25302c));
+        masterVolumeSlider.setColour (juce::Slider::trackColourId, accentColour());
+        masterVolumeSlider.setColour (juce::Slider::thumbColourId, juce::Colours::white);
+        masterVolumeSlider.setTooltip ("Master volume: 100%");
+        masterVolumeSlider.onValueChange = [this]
+        {
+            const auto gain = static_cast<float> (masterVolumeSlider.getValue());
+            masterGain.store (gain);
+            masterVolumeSlider.setTooltip ("Master volume: " + juce::String (juce::roundToInt (gain * 100.0f)) + "%");
+            markProjectDirty();
+        };
+        styleEditorLabel (masterVolumeLabel, 10.0f, false);
+        masterVolumeLabel.setText ("VOL", juce::dontSendNotification);
+        masterVolumeLabel.setJustificationType (juce::Justification::centred);
+        masterVolumeLabel.setTooltip ("Master output volume");
+
         statusLabel.setJustificationType (juce::Justification::centredRight);
         statusLabel.setColour (juce::Label::textColourId, textMuted());
 
@@ -11558,6 +11581,15 @@ public:
                 g.drawVerticalLine (transportSeparatorX, transport.getY() + 7.0f, transport.getBottom() - 7.0f);
         }
 
+        if (! masterOutputBounds.isEmpty())
+        {
+            const auto output = masterOutputBounds.toFloat();
+            g.setColour (appBackground().withAlpha (0.72f));
+            g.fillRoundedRectangle (output, 7.0f);
+            g.setColour (subtleStroke().withAlpha (0.68f));
+            g.drawRoundedRectangle (output.reduced (0.5f), 7.0f, 1.0f);
+        }
+
         if (dataPaneOpen || contextualInspectorOpen)
         {
             const auto pane = getDataPaneBounds().toFloat();
@@ -11577,7 +11609,12 @@ public:
 
         const auto buttonSize = 34;
         constexpr int transportWidth = 700;
-        transportBarBounds = { (getWidth() - transportWidth) / 2, toolbar.getY(), transportWidth, toolbar.getHeight() };
+        constexpr int statusWidth = 120;
+        constexpr int outputWidth = 132;
+        const auto preferredTransportX = (getWidth() - transportWidth) / 2;
+        const auto latestTransportX = getWidth() - 16 - statusWidth - 8 - outputWidth - 10 - transportWidth;
+        const auto transportX = juce::jmax (16, juce::jmin (preferredTransportX, latestTransportX));
+        transportBarBounds = { transportX, toolbar.getY(), transportWidth, toolbar.getHeight() };
         auto transport = transportBarBounds.reduced (5, 2);
         flowButton.setBounds (transport.removeFromLeft (52));
         transport.removeFromLeft (4);
@@ -11597,8 +11634,14 @@ public:
         triggerQuantizeSlider.setBounds (transport.removeFromLeft (124));
         transport.removeFromLeft (8);
         clockButton.setBounds (transport.removeFromLeft (72));
-        statusLabel.setBounds (toolbar.removeFromRight (120));
-        masterMeter.setBounds (toolbar.removeFromRight (48).reduced (3, 13));
+        statusLabel.setBounds (toolbar.removeFromRight (statusWidth));
+        toolbar.removeFromRight (8);
+        masterOutputBounds = toolbar.removeFromRight (outputWidth);
+        auto output = masterOutputBounds.reduced (5, 2);
+        masterVolumeLabel.setBounds (output.removeFromLeft (28));
+        masterVolumeSlider.setBounds (output.removeFromLeft (65).reduced (1, 6));
+        output.removeFromLeft (3);
+        masterMeter.setBounds (output.reduced (1, 8));
         auto dataPane = getDataPaneBounds();
 
         if (dataPaneOpen || contextualInspectorOpen)
@@ -12174,6 +12217,8 @@ private:
     juce::Slider triggerQuantizeSlider;
     juce::TextButton clockButton;
     juce::Label statusLabel;
+    juce::Label masterVolumeLabel;
+    juce::Slider masterVolumeSlider;
     StereoMeter masterMeter;
     AudioDiagnosticsPanel audioDiagnosticsPanel;
     PerformanceDiagnosticsPanel performanceDiagnosticsPanel;
@@ -12360,6 +12405,7 @@ private:
     juce::Rectangle<int> layersPanelBounds;
     juce::Rectangle<int> leftToolPanelBounds;
     juce::Rectangle<int> transportBarBounds;
+    juce::Rectangle<int> masterOutputBounds;
     int transportSeparatorX = 0;
     bool transportRunning = false;
     bool rainbowMode = false;
@@ -13526,7 +13572,10 @@ private:
             [safeThis] (float gain)
             {
                 if (safeThis == nullptr) return;
-                safeThis->masterGain.store (gain); safeThis->markProjectDirty();
+                safeThis->masterGain.store (gain);
+                safeThis->masterVolumeSlider.setValue (gain, juce::dontSendNotification);
+                safeThis->masterVolumeSlider.setTooltip ("Master volume: " + juce::String (juce::roundToInt (gain * 100.0f)) + "%");
+                safeThis->markProjectDirty();
             },
             [safeThis]
             {
@@ -14202,6 +14251,8 @@ private:
         canvas.setFlowTiming (globalTempoBpm, beatsForGridChoice (gridUnitChoice));
         scAudio.setTempo (globalTempoBpm);
         masterGain.store (juce::jlimit (0.0f, 1.5f, static_cast<float> (project.getProperty ("masterGain", 1.0f))));
+        masterVolumeSlider.setValue (masterGain.load(), juce::dontSendNotification);
+        masterVolumeSlider.setTooltip ("Master volume: " + juce::String (juce::roundToInt (masterGain.load() * 100.0f)) + "%");
         refreshClockButton();
     }
 
@@ -14393,7 +14444,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.7.7"; }
+    const juce::String getApplicationVersion() override    { return "0.7.8"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String& commandLine) override
