@@ -110,7 +110,7 @@
     <disc x="240.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.6800000071525574"
           pan="-0.7200000286102295" muted="0" solo="0" id="disc-motor-01">
-      <scCode code="var f = 66.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.46, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 3900 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 66.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.46, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 3900 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.6000000238418579"/>
       <routes/>
       <pipeTaps/>
@@ -127,7 +127,7 @@
     <disc x="288.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.6600000262260437"
           pan="-0.5600000023841858" muted="0" solo="0" id="disc-motor-02">
-      <scCode code="var f = 69.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.4, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 4100 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 69.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.4, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 4100 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.5400000214576721"/>
       <routes/>
       <pipeTaps/>
@@ -144,7 +144,7 @@
     <disc x="336.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.7200000286102295"
           pan="-0.4000000059604645" muted="0" solo="0" id="disc-motor-03">
-      <scCode code="var f = 73.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.52, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 4400 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 73.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.52, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 4400 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.6600000262260437"/>
       <routes/>
       <pipeTaps/>
@@ -161,7 +161,7 @@
     <disc x="384.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.7599999904632568"
           pan="-0.239999994635582" muted="0" solo="0" id="disc-motor-04">
-      <scCode code="var f = 76.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.68, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 4800 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 76.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.68, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 4800 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.8199999928474426"/>
       <routes/>
       <pipeTaps/>
@@ -178,7 +178,7 @@
     <disc x="432.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.699999988079071"
           pan="-0.07999999821186066" muted="0" solo="0" id="disc-motor-05">
-      <scCode code="var f = 74.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.5, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 4300 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 74.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.5, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 4300 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.6399999856948853"/>
       <routes/>
       <pipeTaps/>
@@ -195,7 +195,7 @@
     <disc x="480.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.6700000166893005"
           pan="0.07999999821186066" muted="0" solo="0" id="disc-motor-06">
-      <scCode code="var f = 71.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.44, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 3700 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 71.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.44, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 3700 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.5799999833106995"/>
       <routes/>
       <pipeTaps/>
@@ -212,7 +212,7 @@
     <disc x="528.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.7300000190734863"
           pan="0.239999994635582" muted="0" solo="0" id="disc-motor-07">
-      <scCode code="var f = 73.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.58, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 4500 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 73.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.58, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 4500 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.7200000286102295"/>
       <routes/>
       <pipeTaps/>
@@ -229,7 +229,7 @@
     <disc x="576.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.6899999976158142"
           pan="0.4000000059604645" muted="0" solo="0" id="disc-motor-08">
-      <scCode code="var f = 69.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.46, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 4000 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 69.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.46, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 4000 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.6000000238418579"/>
       <routes/>
       <pipeTaps/>
@@ -246,7 +246,7 @@
     <disc x="624.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.6499999761581421"
           pan="0.5600000023841858" muted="0" solo="0" id="disc-motor-09">
-      <scCode code="var f = 68.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.4, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 3600 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 68.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.4, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 3600 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.5400000214576721"/>
       <routes/>
       <pipeTaps/>
@@ -263,7 +263,7 @@
     <disc x="672.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.7400000095367432"
           pan="0.7200000286102295" muted="0" solo="0" id="disc-motor-10">
-      <scCode code="var f = 64.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.72, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = HPF.ar(LPF.ar(velvet + pulse + glow, 3400 + (env * 1800)), 75); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = 64.midicps; var env = EnvGen.kr(Env.perc(0.004, 0.72, curve: -6), doneAction: 2); var velvet = Mix(Saw.ar(f * [0.996, 0.9985, 1.0, 1.0015, 1.004], [0.03, 0.042, 0.058, 0.042, 0.03])); var pulse = Mix(Pulse.ar(f * [0.5, 0.997, 1.003], [0.46, 0.39, 0.53], [0.11, 0.045, 0.045])); var glow = SinOsc.ar(f * [0.5, 1, 2], 0, [0.075, 0.1, 0.028]).sum; var body = LPF.ar(velvet + pulse + glow, 3400 + (env * 2200)) + SinOsc.ar(f * 0.25, 0, 0.14) + SinOsc.ar(f * 0.5, 0, 0.1); Out.ar(out, Pan2.ar(((body * 2.8) * env * amp).tanh, pan));"
               duration="0.8600000143051147"/>
       <routes/>
       <pipeTaps/>
@@ -280,7 +280,7 @@
     <disc x="240.0" y="408.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.7400000095367432"
           pan="-0.2000000029802322" muted="0" solo="0" id="disc-bass-01">
-      <scCode code="var f = 42.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.72, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.5, 0.998, 1.002], 0, [0.16, 0.28, 0.28]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.1, 0.085, 0.085]).sum, 920 + (env * 1450)); Out.ar(out, Pan2.ar(((sub + edge) * env * amp).tanh, pan));"
+      <scCode code="var f = 42.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.72, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.25, 0.5, 0.998, 1.002], 0, [0.2, 0.28, 0.34, 0.34]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.16, 0.12, 0.12]).sum, 1050 + (env * 1900)); Out.ar(out, Pan2.ar((((sub + edge) * 3.4) * env * amp).tanh, pan));"
               duration="0.8199999928474426"/>
       <routes/>
       <pipeTaps/>
@@ -297,7 +297,7 @@
     <disc x="336.0" y="408.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.6800000071525574"
           pan="0.119999997317791" muted="0" solo="0" id="disc-bass-02">
-      <scCode code="var f = 40.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.52, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.5, 0.998, 1.002], 0, [0.16, 0.28, 0.28]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.1, 0.085, 0.085]).sum, 920 + (env * 1450)); Out.ar(out, Pan2.ar(((sub + edge) * env * amp).tanh, pan));"
+      <scCode code="var f = 40.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.52, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.25, 0.5, 0.998, 1.002], 0, [0.2, 0.28, 0.34, 0.34]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.16, 0.12, 0.12]).sum, 1050 + (env * 1900)); Out.ar(out, Pan2.ar((((sub + edge) * 3.4) * env * amp).tanh, pan));"
               duration="0.6200000047683716"/>
       <routes/>
       <pipeTaps/>
@@ -314,7 +314,7 @@
     <disc x="432.0" y="408.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.7799999713897705"
           pan="-0.07999999821186066" muted="0" solo="0" id="disc-bass-03">
-      <scCode code="var f = 33.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.82, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.5, 0.998, 1.002], 0, [0.16, 0.28, 0.28]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.1, 0.085, 0.085]).sum, 920 + (env * 1450)); Out.ar(out, Pan2.ar(((sub + edge) * env * amp).tanh, pan));"
+      <scCode code="var f = 33.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.82, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.25, 0.5, 0.998, 1.002], 0, [0.2, 0.28, 0.34, 0.34]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.16, 0.12, 0.12]).sum, 1050 + (env * 1900)); Out.ar(out, Pan2.ar((((sub + edge) * 3.4) * env * amp).tanh, pan));"
               duration="0.9200000166893005"/>
       <routes/>
       <pipeTaps/>
@@ -331,7 +331,7 @@
     <disc x="528.0" y="408.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.6600000262260437"
           pan="0.2000000029802322" muted="0" solo="0" id="disc-bass-04">
-      <scCode code="var f = 35.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.48, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.5, 0.998, 1.002], 0, [0.16, 0.28, 0.28]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.1, 0.085, 0.085]).sum, 920 + (env * 1450)); Out.ar(out, Pan2.ar(((sub + edge) * env * amp).tanh, pan));"
+      <scCode code="var f = 35.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.48, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.25, 0.5, 0.998, 1.002], 0, [0.2, 0.28, 0.34, 0.34]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.16, 0.12, 0.12]).sum, 1050 + (env * 1900)); Out.ar(out, Pan2.ar((((sub + edge) * 3.4) * env * amp).tanh, pan));"
               duration="0.5799999833106995"/>
       <routes/>
       <pipeTaps/>
@@ -348,7 +348,7 @@
     <disc x="624.0" y="408.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.7200000286102295"
           pan="-0.1400000005960464" muted="0" solo="0" id="disc-bass-05">
-      <scCode code="var f = 38.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.64, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.5, 0.998, 1.002], 0, [0.16, 0.28, 0.28]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.1, 0.085, 0.085]).sum, 920 + (env * 1450)); Out.ar(out, Pan2.ar(((sub + edge) * env * amp).tanh, pan));"
+      <scCode code="var f = 38.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.64, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.25, 0.5, 0.998, 1.002], 0, [0.2, 0.28, 0.34, 0.34]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.16, 0.12, 0.12]).sum, 1050 + (env * 1900)); Out.ar(out, Pan2.ar((((sub + edge) * 3.4) * env * amp).tanh, pan));"
               duration="0.7400000095367432"/>
       <routes/>
       <pipeTaps/>
@@ -365,7 +365,7 @@
     <disc x="672.0" y="408.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.800000011920929"
           pan="0.07999999821186066" muted="0" solo="0" id="disc-bass-06">
-      <scCode code="var f = 42.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.9, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.5, 0.998, 1.002], 0, [0.16, 0.28, 0.28]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.1, 0.085, 0.085]).sum, 920 + (env * 1450)); Out.ar(out, Pan2.ar(((sub + edge) * env * amp).tanh, pan));"
+      <scCode code="var f = 42.midicps; var env = EnvGen.kr(Env.perc(0.006, 0.9, curve: -7), doneAction: 2); var sub = SinOsc.ar(f * [0.25, 0.5, 0.998, 1.002], 0, [0.2, 0.28, 0.34, 0.34]).sum; var edge = LPF.ar(Pulse.ar(f * [0.5, 0.997, 1.003], [0.48, 0.42, 0.51], [0.16, 0.12, 0.12]).sum, 1050 + (env * 1900)); Out.ar(out, Pan2.ar((((sub + edge) * 3.4) * env * amp).tanh, pan));"
               duration="1.0"/>
       <routes/>
       <pipeTaps/>
@@ -382,7 +382,7 @@
     <disc x="288.0" y="528.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.4600000083446503"
           pan="-0.3199999928474426" muted="0" solo="0" id="disc-chord-a">
-      <scCode code="var f = [54, 57, 61, 68].midicps; var env = EnvGen.kr(Env.linen(0.42, 6.6, 1.15, curve: -3), doneAction: 2); var silk = Mix(Saw.ar(f * 0.996, 0.024) + Saw.ar(f * 0.999, 0.032) + Saw.ar(f * 1.001, 0.032) + Saw.ar(f * 1.004, 0.024)); var core = Mix(SinOsc.ar(f, 0, 0.075)); var octave = Mix(SinOsc.ar(f * 0.5, 0, 0.052)); var shimmer = Mix(SinOsc.ar(f * 2, 0, 0.014)); var air = BPF.ar(WhiteNoise.ar(0.055), 3900, 0.24); var body = LPF.ar(silk + core + octave + shimmer + air, 3000 + (env * 1900)); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = [54, 57, 61, 68].midicps; var env = EnvGen.kr(Env.linen(0.42, 6.6, 1.15, curve: -3), doneAction: 2); var silk = Mix(Saw.ar(f * 0.996, 0.024) + Saw.ar(f * 0.999, 0.032) + Saw.ar(f * 1.001, 0.032) + Saw.ar(f * 1.004, 0.024)); var core = Mix(SinOsc.ar(f, 0, 0.075)); var octave = Mix(SinOsc.ar(f * 0.5, 0, 0.1)) + Mix(SinOsc.ar(f * 0.25, 0, 0.045)); var shimmer = Mix(SinOsc.ar(f * 2, 0, 0.014)); var air = BPF.ar(WhiteNoise.ar(0.055), 3900, 0.24); var body = LPF.ar(silk + core + octave + shimmer + air, 3000 + (env * 1900)); Out.ar(out, Pan2.ar(((body * 2.4) * env * amp).tanh, pan));"
               duration="8.399999618530273"/>
       <routes/>
       <pipeTaps/>
@@ -399,7 +399,7 @@
     <disc x="480.0" y="528.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.4300000071525574"
           pan="0.2800000011920929" muted="0" solo="0" id="disc-chord-b">
-      <scCode code="var f = [50, 54, 57, 61].midicps; var env = EnvGen.kr(Env.linen(0.42, 6.0, 1.15, curve: -3), doneAction: 2); var silk = Mix(Saw.ar(f * 0.996, 0.024) + Saw.ar(f * 0.999, 0.032) + Saw.ar(f * 1.001, 0.032) + Saw.ar(f * 1.004, 0.024)); var core = Mix(SinOsc.ar(f, 0, 0.075)); var octave = Mix(SinOsc.ar(f * 0.5, 0, 0.052)); var shimmer = Mix(SinOsc.ar(f * 2, 0, 0.014)); var air = BPF.ar(WhiteNoise.ar(0.055), 3900, 0.24); var body = LPF.ar(silk + core + octave + shimmer + air, 2850 + (env * 1900)); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = [50, 54, 57, 61].midicps; var env = EnvGen.kr(Env.linen(0.42, 6.0, 1.15, curve: -3), doneAction: 2); var silk = Mix(Saw.ar(f * 0.996, 0.024) + Saw.ar(f * 0.999, 0.032) + Saw.ar(f * 1.001, 0.032) + Saw.ar(f * 1.004, 0.024)); var core = Mix(SinOsc.ar(f, 0, 0.075)); var octave = Mix(SinOsc.ar(f * 0.5, 0, 0.1)) + Mix(SinOsc.ar(f * 0.25, 0, 0.045)); var shimmer = Mix(SinOsc.ar(f * 2, 0, 0.014)); var air = BPF.ar(WhiteNoise.ar(0.055), 3900, 0.24); var body = LPF.ar(silk + core + octave + shimmer + air, 2850 + (env * 1900)); Out.ar(out, Pan2.ar(((body * 2.4) * env * amp).tanh, pan));"
               duration="7.800000190734863"/>
       <routes/>
       <pipeTaps/>
@@ -416,7 +416,7 @@
     <disc x="672.0" y="528.0" sounds="0" worlds="0" triggerMode="1" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.4399999976158142"
           pan="0.03999999910593033" muted="0" solo="0" id="disc-chord-c">
-      <scCode code="var f = [52, 56, 59, 61, 66].midicps; var env = EnvGen.kr(Env.linen(0.42, 7.0, 1.15, curve: -3), doneAction: 2); var silk = Mix(Saw.ar(f * 0.996, 0.024) + Saw.ar(f * 0.999, 0.032) + Saw.ar(f * 1.001, 0.032) + Saw.ar(f * 1.004, 0.024)); var core = Mix(SinOsc.ar(f, 0, 0.075)); var octave = Mix(SinOsc.ar(f * 0.5, 0, 0.052)); var shimmer = Mix(SinOsc.ar(f * 2, 0, 0.014)); var air = BPF.ar(WhiteNoise.ar(0.055), 3900, 0.24); var body = LPF.ar(silk + core + octave + shimmer + air, 3200 + (env * 1900)); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var f = [52, 56, 59, 61, 66].midicps; var env = EnvGen.kr(Env.linen(0.42, 7.0, 1.15, curve: -3), doneAction: 2); var silk = Mix(Saw.ar(f * 0.996, 0.024) + Saw.ar(f * 0.999, 0.032) + Saw.ar(f * 1.001, 0.032) + Saw.ar(f * 1.004, 0.024)); var core = Mix(SinOsc.ar(f, 0, 0.075)); var octave = Mix(SinOsc.ar(f * 0.5, 0, 0.1)) + Mix(SinOsc.ar(f * 0.25, 0, 0.045)); var shimmer = Mix(SinOsc.ar(f * 2, 0, 0.014)); var air = BPF.ar(WhiteNoise.ar(0.055), 3900, 0.24); var body = LPF.ar(silk + core + octave + shimmer + air, 3200 + (env * 1900)); Out.ar(out, Pan2.ar(((body * 2.4) * env * amp).tanh, pan));"
               duration="8.800000190734863"/>
       <routes/>
       <pipeTaps/>
@@ -433,7 +433,7 @@
     <disc x="864.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.8799999952316284"
           pan="0.0" muted="0" solo="0" id="disc-kick-main">
-      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.34, curve: -9), doneAction: 2); var f = XLine.kr(118, 43, 0.13); var body = SinOsc.ar(f, 0, 0.86) + (BPF.ar(WhiteNoise.ar(0.12), 1500, 0.3) * EnvGen.kr(Env.perc(0.001, 0.02))); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.34, curve: -9), doneAction: 2); var f = XLine.kr(118, 43, 0.13); var body = SinOsc.ar(f, 0, 0.86) + (BPF.ar(WhiteNoise.ar(0.12), 1500, 0.3) * EnvGen.kr(Env.perc(0.001, 0.02))); Out.ar(out, Pan2.ar(((body * 2.4) * env * amp).tanh, pan));"
               duration="0.4000000059604645"/>
       <routes/>
       <pipeTaps/>
@@ -450,7 +450,7 @@
     <disc x="864.0" y="312.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.6200000047683716"
           pan="-0.07999999821186066" muted="0" solo="0" id="disc-kick-skip">
-      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.22, curve: -10), doneAction: 2); var body = SinOsc.ar(XLine.kr(92, 48, 0.09), 0, 0.72); Out.ar(out, Pan2.ar((body * env * amp).tanh, pan));"
+      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.22, curve: -10), doneAction: 2); var body = SinOsc.ar(XLine.kr(92, 48, 0.09), 0, 0.72); Out.ar(out, Pan2.ar(((body * 2.4) * env * amp).tanh, pan));"
               duration="0.2800000011920929"/>
       <routes/>
       <pipeTaps/>
@@ -467,7 +467,7 @@
     <disc x="936.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.699999988079071"
           pan="0.119999997317791" muted="0" solo="0" id="disc-snare-main">
-      <scCode code="var env = EnvGen.kr(Env.perc(0.002, 0.24, curve: -6), doneAction: 2); var snap = HPF.ar(WhiteNoise.ar(0.56), 1900); var body = (SinOsc.ar(184, 0, 0.18) + snap) * env; Out.ar(out, Pan2.ar((body * amp).tanh, pan));"
+      <scCode code="var env = EnvGen.kr(Env.perc(0.002, 0.24, curve: -6), doneAction: 2); var snap = HPF.ar(WhiteNoise.ar(0.56), 1900); var body = (SinOsc.ar(184, 0, 0.18) + snap) * env; Out.ar(out, Pan2.ar(((body * 2.8) * amp).tanh, pan));"
               duration="0.300000011920929"/>
       <routes/>
       <pipeTaps/>
@@ -484,7 +484,7 @@
     <disc x="936.0" y="312.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.4199999868869781"
           pan="-0.2199999988079071" muted="0" solo="0" id="disc-snare-ghost">
-      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.11, curve: -7), doneAction: 2); var body = BPF.ar(WhiteNoise.ar(0.46), 2800, 0.48) * env; Out.ar(out, Pan2.ar((body * amp).tanh, pan));"
+      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.11, curve: -7), doneAction: 2); var body = BPF.ar(WhiteNoise.ar(0.46), 2800, 0.48) * env; Out.ar(out, Pan2.ar(((body * 2.8) * amp).tanh, pan));"
               duration="0.1599999964237213"/>
       <routes/>
       <pipeTaps/>
@@ -501,7 +501,7 @@
     <disc x="1008.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.4199999868869781"
           pan="0.4799999892711639" muted="0" solo="0" id="disc-hat-closed">
-      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.055, curve: -9), doneAction: 2); var body = HPF.ar(BPF.ar(WhiteNoise.ar(0.5), 8200, 0.42), 5200) * env; Out.ar(out, Pan2.ar((body * amp).tanh, pan));"
+      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.055, curve: -9), doneAction: 2); var body = HPF.ar(BPF.ar(WhiteNoise.ar(0.5), 8200, 0.42), 5200) * env; Out.ar(out, Pan2.ar(((body * 2.8) * amp).tanh, pan));"
               duration="0.09000000357627869"/>
       <routes/>
       <pipeTaps/>
@@ -518,7 +518,7 @@
     <disc x="1008.0" y="312.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.3199999928474426"
           pan="-0.4600000083446503" muted="0" solo="0" id="disc-hat-open">
-      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.28, curve: -7), doneAction: 2); var body = HPF.ar(WhiteNoise.ar(0.34), 6100) * env; Out.ar(out, Pan2.ar((body * amp).tanh, pan));"
+      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.28, curve: -7), doneAction: 2); var body = HPF.ar(WhiteNoise.ar(0.34), 6100) * env; Out.ar(out, Pan2.ar(((body * 2.8) * amp).tanh, pan));"
               duration="0.3400000035762787"/>
       <routes/>
       <pipeTaps/>
@@ -535,7 +535,7 @@
     <disc x="1080.0" y="264.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.3400000035762787"
           pan="0.6399999856948853" muted="0" solo="0" id="disc-glitch-a">
-      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.095, curve: -8), doneAction: 2); var clock = Impulse.ar(96 + (pitch * 2)); var held = Latch.ar(WhiteNoise.ar(0.58), clock); var body = BPF.ar(held, 2400 + (pitch * 41), 0.22) * env; Out.ar(out, Pan2.ar((body * amp).tanh, pan));"
+      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.095, curve: -8), doneAction: 2); var clock = Impulse.ar(96 + (pitch * 2)); var held = Latch.ar(WhiteNoise.ar(0.58), clock); var body = BPF.ar(held, 2400 + (pitch * 41), 0.22) * env; Out.ar(out, Pan2.ar(((body * 2.8) * amp).tanh, pan));"
               duration="0.1400000005960464"/>
       <routes/>
       <pipeTaps/>
@@ -552,7 +552,7 @@
     <disc x="1080.0" y="312.0" sounds="0" worlds="0" triggerMode="0" elementMode="0"
           elementProbability="1.0" holdDropsUntilFinished="0" level="0.2800000011920929"
           pan="-0.6600000262260437" muted="0" solo="0" id="disc-glitch-b">
-      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.16, curve: -8), doneAction: 2); var body = Ringz.ar(Impulse.ar(0), [740, 1110, 1730], [0.06, 0.04, 0.025], [0.2, 0.13, 0.09]).sum * env; Out.ar(out, Pan2.ar((body * amp).tanh, pan));"
+      <scCode code="var env = EnvGen.kr(Env.perc(0.001, 0.16, curve: -8), doneAction: 2); var body = Ringz.ar(Impulse.ar(0), [740, 1110, 1730], [0.06, 0.04, 0.025], [0.2, 0.13, 0.09]).sum * env; Out.ar(out, Pan2.ar(((body * 2.8) * amp).tanh, pan));"
               duration="0.2199999988079071"/>
       <routes/>
       <pipeTaps/>

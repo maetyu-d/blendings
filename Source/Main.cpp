@@ -10730,6 +10730,7 @@ public:
         addAndMakeVisible (gridUnitBox);
         addAndMakeVisible (triggerQuantizeSlider);
         addAndMakeVisible (clockButton);
+        addAndMakeVisible (projectTitleLabel);
         addAndMakeVisible (statusLabel);
         addAndMakeVisible (masterVolumeLabel);
         addAndMakeVisible (masterVolumeSlider);
@@ -11149,6 +11150,10 @@ public:
         clockButton.setTooltip ("Configure auxiliary clocks");
         clockButton.onClick = [this] { openClockSettings(); };
         refreshClockButton();
+
+        styleEditorLabel (projectTitleLabel, 12.0f, true);
+        projectTitleLabel.setJustificationType (juce::Justification::centredLeft);
+        projectTitleLabel.setMinimumHorizontalScale (0.72f);
 
         masterVolumeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
         masterVolumeSlider.setRange (0.0, 1.5, 0.01);
@@ -11615,6 +11620,8 @@ public:
         const auto latestTransportX = getWidth() - 16 - statusWidth - 8 - outputWidth - 10 - transportWidth;
         const auto transportX = juce::jmax (16, juce::jmin (preferredTransportX, latestTransportX));
         transportBarBounds = { transportX, toolbar.getY(), transportWidth, toolbar.getHeight() };
+        const auto projectWidth = juce::jmax (0, juce::jmin (260, transportX - toolbar.getX() - 12));
+        projectTitleLabel.setBounds (toolbar.getX(), toolbar.getY(), projectWidth, toolbar.getHeight());
         auto transport = transportBarBounds.reduced (5, 2);
         flowButton.setBounds (transport.removeFromLeft (52));
         transport.removeFromLeft (4);
@@ -12216,6 +12223,7 @@ private:
     juce::ComboBox gridUnitBox;
     juce::Slider triggerQuantizeSlider;
     juce::TextButton clockButton;
+    juce::Label projectTitleLabel;
     juce::Label statusLabel;
     juce::Label masterVolumeLabel;
     juce::Slider masterVolumeSlider;
@@ -14258,11 +14266,15 @@ private:
 
     void updateProjectPresentation()
     {
+        const auto name = currentProjectFile == juce::File() ? "Untitled" : currentProjectFile.getFileNameWithoutExtension();
+        projectTitleLabel.setText (name + (projectDirty ? " *" : ""), juce::dontSendNotification);
+        projectTitleLabel.setTooltip (currentProjectFile == juce::File()
+                                          ? "Unsaved project"
+                                          : currentProjectFile.getFullPathName());
 #if JUCE_MAC
         if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
             window->setName ({});
 #else
-        const auto name = currentProjectFile == juce::File() ? "Untitled" : currentProjectFile.getFileNameWithoutExtension();
         if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
             window->setName ("Blendings - " + name + (projectDirty ? " *" : ""));
 #endif
@@ -14444,7 +14456,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.7.8"; }
+    const juce::String getApplicationVersion() override    { return "0.7.9"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String& commandLine) override
