@@ -993,7 +993,24 @@ public:
         tempoSlider.setValue (bpm, juce::dontSendNotification);
         repaint();
     }
-    void setWorkspaceRunning (bool running) { setPlaying (running); }
+    void setWorkspaceRunning (bool running)
+    {
+        if (playing == running)
+            return;
+
+        playing = running;
+        lastTimerMs = currentClockMs();
+        if (playing)
+            updateGravityForSelectedFace();
+        setStatus (playing ? "Water running in eighths" : "Paused");
+        updateButtonStates();
+        repaint();
+    }
+    void setWorkspaceSampleClock (std::function<double()> clockSeconds)
+    {
+        sampleClockSeconds = std::move (clockSeconds);
+        lastTimerMs = currentClockMs();
+    }
     void setWorkspaceChangeCallback (std::function<void()> callback) { onWorkspaceChanged = std::move (callback); }
     void setDiscTriggerCallback (std::function<void(const otherware::PipeWorkspaceDiscTrigger&)> callback)
     {
@@ -1715,6 +1732,7 @@ private:
     double bpm = 120.0;
     double emitAccumulator = 0.0;
     double lastTimerMs = 0.0;
+    std::function<double()> sampleClockSeconds;
     double animationPhase = 0.0;
     IVec3 gravityVector { 0, -1, 0 };
     std::vector<Flow> flows;
@@ -2884,7 +2902,7 @@ private:
     {
         playing = shouldPlay;
         emitAccumulator = shouldPlay ? secondsPerBeat() : 0.0;
-        lastTimerMs = juce::Time::getMillisecondCounterHiRes();
+        lastTimerMs = currentClockMs();
 
         if (shouldPlay)
             updateGravityForSelectedFace();
@@ -2905,11 +2923,19 @@ private:
         return 60.0 / juce::jlimit (30.0, 240.0, bpm);
     }
 
+    double currentClockMs() const
+    {
+        return sampleClockSeconds ? sampleClockSeconds() * 1000.0
+                                  : juce::Time::getMillisecondCounterHiRes();
+    }
+
     void timerCallback() override
     {
-        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const auto now = currentClockMs();
+        if (now < lastTimerMs)
+            lastTimerMs = now;
         const auto dt = lastTimerMs > 0.0 ? juce::jlimit (0.0, 0.1, (now - lastTimerMs) / 1000.0) : 0.0;
-        lastTimerMs = now;
+        lastTimerMs += dt * 1000.0;
 
         if (playing)
         {
@@ -4203,6 +4229,12 @@ void setPipeWorkspaceTempo (juce::Component& component, double bpm)
 {
     if (auto* workspace = dynamic_cast<PipeWorkspaceComponent*> (&component))
         workspace->setWorkspaceTempo (bpm);
+}
+
+void setPipeWorkspaceSampleClock (juce::Component& component, std::function<double()> clockSeconds)
+{
+    if (auto* workspace = dynamic_cast<PipeWorkspaceComponent*> (&component))
+        workspace->setWorkspaceSampleClock (std::move (clockSeconds));
 }
 
 void setPipeWorkspaceRunning (juce::Component& component, bool running)

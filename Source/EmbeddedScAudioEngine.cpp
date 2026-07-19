@@ -437,6 +437,10 @@ struct EmbeddedScAudioEngine::Impl
         maxBlockSize = juce::jmax(maximumBlockSize, hostRenderQuantum);
         numOutputChannels = juce::jlimit(2, 512, outputChannels);
         interleavedOutput.assign(static_cast<std::size_t>(maxBlockSize + hostRenderQuantum) * static_cast<std::size_t>(numOutputChannels), 0.0f);
+        hostOutputScratch.assign(static_cast<std::size_t>(maxBlockSize) * static_cast<std::size_t>(numOutputChannels), 0.0f);
+        pendingInterleavedOutput.assign(static_cast<std::size_t>(hostRenderQuantum) * static_cast<std::size_t>(numOutputChannels), 0.0f);
+        pendingOutputReadFrame = 0;
+        pendingOutputFrames = 0;
 
         worldOptions = WorldOptions();
         worldOptions.mRealTime = true;
@@ -523,6 +527,8 @@ struct EmbeddedScAudioEngine::Impl
         if (! ready.load(std::memory_order_acquire) || world == nullptr)
             return;
 
+        pendingOutputReadFrame = 0;
+        pendingOutputFrames = 0;
         sendPacket(buildOscMessage("/g_freeAll", { OscArgument::integer(sourceGroupId) }));
         activeNodeByInstrument.clear();
     }
@@ -643,20 +649,74 @@ private:
 
         flushQueuedEvents();
 
-        const auto paddedFrames = ((frames + hostRenderQuantum - 1) / hostRenderQuantum) * hostRenderQuantum;
-        std::fill(interleavedOutput.begin(), interleavedOutput.begin() + static_cast<std::ptrdiff_t>(paddedFrames * numOutputChannels), 0.0f);
-
-        if (! worldRenderHostAudio(world, nullptr, interleavedOutput.data(), paddedFrames, 0, numOutputChannels))
+        const float* renderedOutput = nullptr;
+        auto copiedFrames = 0;
+        const auto copyInterleaved = [this, &copiedFrames] (const float* source, const int sourceFrame, const int count)
         {
-            renderFailures.fetch_add(1, std::memory_order_relaxed);
-            return;
+            std::copy_n(source + static_cast<std::ptrdiff_t>(sourceFrame * numOutputChannels),
+                        static_cast<std::size_t>(count * numOutputChannels),
+                        hostOutputScratch.begin() + static_cast<std::ptrdiff_t>(copiedFrames * numOutputChannels));
+            copiedFrames += count;
+        };
+
+        if (pendingOutputFrames == 0 && frames % hostRenderQuantum == 0)
+        {
+            std::fill(interleavedOutput.begin(),
+                      interleavedOutput.begin() + static_cast<std::ptrdiff_t>(frames * numOutputChannels),
+                      0.0f);
+
+            if (! worldRenderHostAudio(world, nullptr, interleavedOutput.data(), frames, 0, numOutputChannels))
+            {
+                renderFailures.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+
+            renderedOutput = interleavedOutput.data();
         }
+        else if (pendingOutputFrames > 0)
+        {
+            const auto count = juce::jmin(frames, pendingOutputFrames);
+            copyInterleaved(pendingInterleavedOutput.data(), pendingOutputReadFrame, count);
+            pendingOutputReadFrame += count;
+            pendingOutputFrames -= count;
+            if (pendingOutputFrames == 0)
+                pendingOutputReadFrame = 0;
+        }
+
+        if (renderedOutput == nullptr && copiedFrames < frames)
+        {
+            const auto requiredFrames = frames - copiedFrames;
+            const auto renderedFrames = ((requiredFrames + hostRenderQuantum - 1) / hostRenderQuantum) * hostRenderQuantum;
+            std::fill(interleavedOutput.begin(),
+                      interleavedOutput.begin() + static_cast<std::ptrdiff_t>(renderedFrames * numOutputChannels),
+                      0.0f);
+
+            if (! worldRenderHostAudio(world, nullptr, interleavedOutput.data(), renderedFrames, 0, numOutputChannels))
+            {
+                renderFailures.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+
+            copyInterleaved(interleavedOutput.data(), 0, requiredFrames);
+
+            pendingOutputFrames = renderedFrames - requiredFrames;
+            pendingOutputReadFrame = 0;
+            if (pendingOutputFrames > 0)
+            {
+                std::copy_n(interleavedOutput.begin() + static_cast<std::ptrdiff_t>(requiredFrames * numOutputChannels),
+                            static_cast<std::size_t>(pendingOutputFrames * numOutputChannels),
+                            pendingInterleavedOutput.begin());
+            }
+        }
+
+        if (renderedOutput == nullptr)
+            renderedOutput = hostOutputScratch.data();
 
         float peak = 0.0f;
         for (int frame = 0; frame < frames; ++frame)
         {
             for (int channel = 0; channel < numOutputChannels; ++channel)
-                peak = juce::jmax(peak, std::abs(interleavedOutput[static_cast<std::size_t>(frame * numOutputChannels + channel)]));
+                peak = juce::jmax(peak, std::abs(renderedOutput[static_cast<std::size_t>(frame * numOutputChannels + channel)]));
         }
 
         auto outputGain = applyMasterProcessing ? juce::jlimit(0.0f, 1.25f, masterLevel) : 1.0f;
@@ -670,7 +730,7 @@ private:
 
             for (int frame = 0; frame < frames; ++frame)
             {
-                const auto sample = interleavedOutput[static_cast<std::size_t>(frame * numOutputChannels + sourceChannel)] * outputGain;
+                const auto sample = renderedOutput[static_cast<std::size_t>(frame * numOutputChannels + sourceChannel)] * outputGain;
                 dst[frame] = std::isfinite(sample)
                                  ? (applyMasterProcessing ? juce::jlimit(-outputLimit, outputLimit, sample) : sample)
                                  : 0.0f;
@@ -1126,6 +1186,10 @@ private:
         pendingPackets.clear();
         queuedScratch.clear();
         interleavedOutput.clear();
+        hostOutputScratch.clear();
+        pendingInterleavedOutput.clear();
+        pendingOutputReadFrame = 0;
+        pendingOutputFrames = 0;
         currentSampleRate = 0.0;
         maxBlockSize = 0;
         numOutputChannels = 0;
@@ -1143,6 +1207,8 @@ private:
     juce::String status = "EMBEDDED SC OFF";
     juce::String pluginPath;
     std::vector<float> interleavedOutput;
+    std::vector<float> hostOutputScratch;
+    std::vector<float> pendingInterleavedOutput;
     std::vector<std::vector<char>> pendingPackets;
     std::vector<std::vector<char>> queuedScratch;
     std::map<juce::String, std::int32_t> activeNodeByInstrument;
@@ -1162,6 +1228,8 @@ private:
     double currentSampleRate = 0.0;
     int maxBlockSize = 0;
     int numOutputChannels = 0;
+    int pendingOutputReadFrame = 0;
+    int pendingOutputFrames = 0;
     WorldOptions worldOptions;
     World* world = nullptr;
     void* serverLibrary = nullptr;

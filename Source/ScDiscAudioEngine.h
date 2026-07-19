@@ -47,6 +47,7 @@ public:
 
     void trigger (const DiscAudioTrigger& trigger);
     void triggerMany (const std::vector<DiscAudioTrigger>& triggers);
+    void scheduleTriggerManyAtSample (const std::vector<DiscAudioTrigger>& triggers, std::int64_t dueSample);
     void triggerMidiNote (int midiNote, float velocity = 0.8f);
     bool triggerPdGui (const juce::String& patch, const juce::String& receiver, float value, bool bangOnly, float durationSeconds, const juce::String& searchPath = {});
     bool triggerPdMessage (const juce::String& patch, const juce::String& receiver, const juce::String& selector, const juce::StringArray& atoms, float durationSeconds, const juce::String& searchPath = {});
@@ -63,6 +64,13 @@ public:
                                                                          const juce::String& searchPath = {},
                                                                          int maximumSamples = 65536);
     bool runPdMidiOutputSmoke();
+    void setTempo (double bpm) noexcept;
+    [[nodiscard]] std::int64_t getRenderedSamplePosition() const noexcept { return renderedSamples.load(); }
+    [[nodiscard]] double getSampleRate() const noexcept { return currentSampleRate; }
+    [[nodiscard]] std::int64_t alignedEventSample (std::int64_t sample) const noexcept;
+    void suspendScheduledEvents();
+    void resumeScheduledEvents();
+    void cancelScheduledEvents();
     void stopPreview();
 
     [[nodiscard]] bool isReady() const noexcept;
@@ -75,12 +83,21 @@ private:
         gridcollider::InternalEvent event;
     };
 
+    struct ScheduledPdTrigger
+    {
+        std::int64_t dueSample = 0;
+        juce::String patch;
+        juce::String searchPath;
+        float durationSeconds = -1.0f;
+        float triggerValue = -1.0f;
+    };
+
     gridcollider::EmbeddedScAudioEngine embeddedSc;
     PdAudioEngine pdAudio;
     double currentSampleRate = 44100.0;
-    double currentBpm = 120.0;
+    std::atomic<double> currentBpm { 120.0 };
     int currentOutputChannels = 2;
-    std::uint64_t tick = 0;
+    std::atomic<std::uint64_t> tick { 0 };
     int triggerCounter = 0;
     bool ready = false;
     int nextProgramId = 1;
@@ -89,17 +106,21 @@ private:
     std::map<juce::String, juce::String> loadedPdPrograms;
     std::set<juce::String> failedScPrograms;
     std::set<juce::String> failedPdPrograms;
-    juce::CriticalSection scheduledEventLock;
+    mutable juce::CriticalSection scheduledEventLock;
     std::vector<ScheduledEvent> scheduledEvents;
+    std::vector<ScheduledPdTrigger> scheduledPdTriggers;
+    std::vector<ScheduledEvent> suspendedEvents;
+    std::vector<ScheduledPdTrigger> suspendedPdTriggers;
     std::atomic<std::int64_t> renderedSamples { 0 };
     std::atomic<bool> pdAudioInputMuted { true };
 
     gridcollider::InternalEvent makeNoteEvent (const DiscAudioTrigger& trigger, int elementIndex);
     gridcollider::InternalEvent makeScProgramEvent (const DiscAudioTrigger& trigger);
     gridcollider::InternalEvent makePdPatchEvent (const DiscAudioTrigger& trigger);
-    bool scheduleScSheet (const DiscAudioTrigger& trigger);
-    bool scheduleOrcaGrid (const DiscAudioTrigger& trigger);
-    void enqueueDueScheduledEvents();
+    bool scheduleScSheet (const DiscAudioTrigger& trigger, std::int64_t startSample);
+    bool scheduleOrcaGrid (const DiscAudioTrigger& trigger, std::int64_t startSample);
+    void dispatchDueScheduledEvents (std::int64_t now);
+    [[nodiscard]] std::int64_t nextScheduledSampleAfter (std::int64_t now) const;
     juce::String synthForProgram (const juce::String& program);
     juce::String compileProgram (const juce::String& program);
     juce::String synthForPdPatch (const juce::String& patch);

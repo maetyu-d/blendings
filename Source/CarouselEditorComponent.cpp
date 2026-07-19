@@ -313,7 +313,9 @@ CarouselEditorComponent::CarouselEditorComponent()
 
 CarouselEditorComponent::~CarouselEditorComponent() { stopTimer(); }
 void CarouselEditorComponent::setDocument (const CarouselDocument& d) { suppress = true; document = d; for (auto& item : document.items) ensureToneSources (item); selected = -1; undoHistory.clear(); redoHistory.clear(); bpmSlider.setValue (d.bpm); columnsBox.setSelectedId (d.columns, juce::dontSendNotification); rowsBox.setSelectedId (d.rows, juce::dontSendNotification); suppress = false; refreshInspector(); repaint(); }
-void CarouselEditorComponent::setRunning (bool value) { running = value; contacts.clear(); lastTime = juce::Time::getMillisecondCounterHiRes(); playButton.setButtonText (running ? "Stop" : "Play"); repaint(); }
+double CarouselEditorComponent::currentClockMs() const { return sampleClockSeconds ? sampleClockSeconds() * 1000.0 : juce::Time::getMillisecondCounterHiRes(); }
+void CarouselEditorComponent::setSampleClock (std::function<double()> clockSeconds) { sampleClockSeconds = std::move (clockSeconds); lastTime = currentClockMs(); }
+void CarouselEditorComponent::setRunning (bool value) { running = value; contacts.clear(); lastTime = currentClockMs(); playButton.setButtonText (running ? "Stop" : "Play"); repaint(); }
 void CarouselEditorComponent::setTool (Tool value) { tool = value; repaint(); }
 CarouselDocument::Item* CarouselEditorComponent::selectedItem() { for (auto& i : document.items) if (i.id == selected) return &i; return nullptr; }
 const CarouselDocument::Item* CarouselEditorComponent::selectedItem() const { for (const auto& i : document.items) if (i.id == selected) return &i; return nullptr; }
@@ -418,7 +420,7 @@ void CarouselEditorComponent::paint (juce::Graphics& g)
             }
             else
             {
-                g.setColour (itemColour (i)); g.fillEllipse (p.x-12,p.y-12,24,24); g.setColour (bg()); g.setFont (10); g.drawText (noteName (i.midi), juce::Rectangle<float> (p.x-22,p.y-7,44.0f,14.0f), juce::Justification::centred); if (i.playback != CarouselDocument::PlaybackType::synth) { const auto tag = i.playback == CarouselDocument::PlaybackType::superCollider ? "SC" : "PD"; g.setColour (surface()); g.fillRoundedRectangle (p.x+7,p.y-17,19,11,3); g.setColour (itemColour(i)); g.setFont (juce::FontOptions (7.5f).withStyle ("Bold")); g.drawText (tag, juce::Rectangle<float> (p.x+7,p.y-17,19,11), juce::Justification::centred); } if (const auto active = activeToneUntilMs.find (i.id); active != activeToneUntilMs.end() && active->second > juce::Time::getMillisecondCounterHiRes()) { g.setColour (juce::Colours::white.withAlpha (0.88f)); g.drawEllipse (p.x-20,p.y-20,40,40,3.0f); } if(sel){g.setColour(accent());g.drawEllipse(p.x-17,p.y-17,34,34,1.5f);}
+                g.setColour (itemColour (i)); g.fillEllipse (p.x-12,p.y-12,24,24); g.setColour (bg()); g.setFont (10); g.drawText (noteName (i.midi), juce::Rectangle<float> (p.x-22,p.y-7,44.0f,14.0f), juce::Justification::centred); if (i.playback != CarouselDocument::PlaybackType::synth) { const auto tag = i.playback == CarouselDocument::PlaybackType::superCollider ? "SC" : "PD"; g.setColour (surface()); g.fillRoundedRectangle (p.x+7,p.y-17,19,11,3); g.setColour (itemColour(i)); g.setFont (juce::FontOptions (7.5f).withStyle ("Bold")); g.drawText (tag, juce::Rectangle<float> (p.x+7,p.y-17,19,11), juce::Justification::centred); } if (const auto active = activeToneUntilMs.find (i.id); active != activeToneUntilMs.end() && active->second > currentClockMs()) { g.setColour (juce::Colours::white.withAlpha (0.88f)); g.drawEllipse (p.x-20,p.y-20,40,40,3.0f); } if(sel){g.setColour(accent());g.drawEllipse(p.x-17,p.y-17,34,34,1.5f);}
             }
         }
     }
@@ -673,7 +675,7 @@ void CarouselEditorComponent::changed(){repaint();if(!suppress&&onChange)onChang
 
 void CarouselEditorComponent::triggerTone (const CarouselDocument::Item& item)
 {
-    activeToneUntilMs[item.id] = juce::Time::getMillisecondCounterHiRes() + 360.0;
+    activeToneUntilMs[item.id] = currentClockMs() + 360.0;
     repaint();
     if (onTone) onTone (item);
 }
@@ -942,14 +944,16 @@ void CarouselEditorComponent::changeSelectedAttachment()
 
 void CarouselEditorComponent::timerCallback()
 {
-    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto now = currentClockMs();
     const auto activeCount = activeToneUntilMs.size();
     for (auto it = activeToneUntilMs.begin(); it != activeToneUntilMs.end();)
         it = it->second <= now ? activeToneUntilMs.erase (it) : std::next (it);
     if (activeCount != activeToneUntilMs.size()) repaint();
     if (! running) { lastTime = now; return; }
-    const auto dt = static_cast<float> (juce::jmin (.035, (now - lastTime) / 1000.0));
-    lastTime = now;
+    if (now < lastTime)
+        lastTime = now;
+    const auto dt = static_cast<float> (juce::jlimit (0.0, .035, (now - lastTime) / 1000.0));
+    lastTime += static_cast<double> (dt) * 1000.0;
     struct MovingSound
     {
         int carrierId = -1;

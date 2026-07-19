@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <limits>
 
 namespace
 {
@@ -358,10 +359,15 @@ void ScDiscAudioEngine::prepare (double sampleRate, int maximumBlockSize, int ou
     currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     currentOutputChannels = juce::jmax (2, outputChannels);
     renderedSamples.store (0);
+    tick.store (0);
+    triggerCounter = 0;
 
     {
         const juce::ScopedLock lock (scheduledEventLock);
         scheduledEvents.clear();
+        scheduledPdTriggers.clear();
+        suspendedEvents.clear();
+        suspendedPdTriggers.clear();
     }
 
     ready = embeddedSc.prepare (currentSampleRate, juce::jmax (64, maximumBlockSize), currentOutputChannels);
@@ -370,7 +376,7 @@ void ScDiscAudioEngine::prepare (double sampleRate, int maximumBlockSize, int ou
     if (ready)
     {
         embeddedSc.setMasterLevel (0.78f);
-        embeddedSc.setTransport (currentBpm, tick, true);
+        embeddedSc.setTransport (currentBpm.load(), tick.load(), true);
     }
 }
 
@@ -386,6 +392,9 @@ void ScDiscAudioEngine::release() noexcept
     {
         const juce::ScopedLock lock (scheduledEventLock);
         scheduledEvents.clear();
+        scheduledPdTriggers.clear();
+        suspendedEvents.clear();
+        suspendedPdTriggers.clear();
     }
     renderedSamples.store (0);
     nextProgramId = 1;
@@ -395,12 +404,43 @@ void ScDiscAudioEngine::render (juce::AudioBuffer<float>& output, const juce::Au
 {
     output.clear();
 
-    if (ready)
+    if (! ready || output.getNumSamples() <= 0)
+        return;
+
+    const auto blockStart = renderedSamples.load();
+    const auto blockEnd = blockStart + output.getNumSamples();
+    auto cursor = 0;
+
+    while (cursor < output.getNumSamples())
     {
-        enqueueDueScheduledEvents();
-        embeddedSc.render (output);
-        pdAudio.renderAndAdd (output, pdAudioInputMuted.load() ? nullptr : input);
-        renderedSamples.fetch_add (output.getNumSamples());
+        const auto currentSample = blockStart + cursor;
+        dispatchDueScheduledEvents (currentSample);
+
+        const auto nextEvent = nextScheduledSampleAfter (currentSample);
+        const auto segmentEnd = nextEvent > currentSample && nextEvent < blockEnd
+                                  ? nextEvent
+                                  : blockEnd;
+        const auto segmentSamples = static_cast<int> (segmentEnd - currentSample);
+        if (segmentSamples <= 0)
+            break;
+
+        juce::AudioBuffer<float> outputView (output.getArrayOfWritePointers(), output.getNumChannels(),
+                                             cursor, segmentSamples);
+        embeddedSc.render (outputView);
+
+        if (input != nullptr)
+        {
+            juce::AudioBuffer<float> inputView (const_cast<float* const*> (input->getArrayOfReadPointers()),
+                                                input->getNumChannels(), cursor, segmentSamples);
+            pdAudio.renderAndAdd (outputView, pdAudioInputMuted.load() ? nullptr : &inputView);
+        }
+        else
+        {
+            pdAudio.renderAndAdd (outputView, nullptr);
+        }
+
+        cursor += segmentSamples;
+        renderedSamples.store (blockStart + cursor);
     }
 }
 
@@ -414,16 +454,19 @@ void ScDiscAudioEngine::triggerMidiNote (int midiNote, float velocity)
     if (! ready)
         return;
     gridcollider::EventFields fields;
-    fields.timestampSeconds = static_cast<double> (tick) * 60.0 / currentBpm;
-    fields.tick = tick++;
+    const auto bpm = currentBpm.load();
+    const auto eventTick = tick.fetch_add (1);
+    fields.timestampSeconds = static_cast<double> (eventTick) * 60.0 / bpm;
+    fields.tick = eventTick;
     fields.instrumentName = "tone";
     fields.pitch = juce::jlimit (0, 127, midiNote);
     fields.velocity = juce::jlimit (0.0f, 1.0f, velocity);
     fields.durationTicks = 1;
     fields.parameters["velocity"] = juce::String (fields.velocity, 3);
-    fields.parameters["tempo"] = juce::String (currentBpm, 3);
-    embeddedSc.setTransport (currentBpm, tick, true);
-    embeddedSc.enqueue ({ gridcollider::InternalEvent { gridcollider::NoteEvent { fields } } });
+    fields.parameters["tempo"] = juce::String (bpm, 3);
+    const juce::ScopedLock lock (scheduledEventLock);
+    scheduledEvents.push_back ({ alignedEventSample (renderedSamples.load()),
+                                 gridcollider::InternalEvent { gridcollider::NoteEvent { fields } } });
 }
 
 void ScDiscAudioEngine::triggerMany (const std::vector<DiscAudioTrigger>& triggers)
@@ -431,38 +474,59 @@ void ScDiscAudioEngine::triggerMany (const std::vector<DiscAudioTrigger>& trigge
     if (! ready || triggers.empty())
         return;
 
-    std::vector<gridcollider::InternalEvent> events;
-    bool scheduledSequence = false;
+    scheduleTriggerManyAtSample (triggers, renderedSamples.load());
+}
+
+void ScDiscAudioEngine::scheduleTriggerManyAtSample (const std::vector<DiscAudioTrigger>& triggers,
+                                                      std::int64_t dueSample)
+{
+    if (! ready || triggers.empty())
+        return;
+
+    const auto eventSample = alignedEventSample (juce::jmax (renderedSamples.load(), dueSample));
+    std::vector<ScheduledEvent> events;
+    events.reserve (triggers.size());
 
     for (const auto& triggerToPlay : triggers)
     {
         if (triggerToPlay.hasOrcaGridScore())
         {
-            scheduledSequence = scheduleOrcaGrid (triggerToPlay) || scheduledSequence;
+            scheduleOrcaGrid (triggerToPlay, eventSample);
             continue;
         }
 
         if (triggerToPlay.hasScSheetScore())
         {
-            scheduledSequence = scheduleScSheet (triggerToPlay) || scheduledSequence;
+            scheduleScSheet (triggerToPlay, eventSample);
             continue;
         }
 
         if (triggerToPlay.hasScCode())
         {
             if (synthForProgram (triggerToPlay.scCode).isNotEmpty())
-                events.push_back (makeScProgramEvent (triggerToPlay));
+                events.push_back ({ eventSample, makeScProgramEvent (triggerToPlay) });
 
             continue;
         }
 
         if (triggerToPlay.hasPdPatch())
         {
-            if (pdAudio.triggerPatch (triggerToPlay.pdPatch, triggerToPlay.pdDurationSeconds, triggerToPlay.pdSearchPath,
-                                      static_cast<float> (triggerToPlay.midiNote)))
-                scheduledSequence = true;
+            if (pdAudio.isReady())
+            {
+                // Do file creation and Pd graph loading on the caller thread. The
+                // audio callback then only sends the sample-aligned trigger.
+                if (pdAudio.preparePatch (triggerToPlay.pdPatch, triggerToPlay.pdSearchPath))
+                {
+                    const juce::ScopedLock lock (scheduledEventLock);
+                    scheduledPdTriggers.push_back ({ eventSample, triggerToPlay.pdPatch, triggerToPlay.pdSearchPath,
+                                                     triggerToPlay.pdDurationSeconds,
+                                                     static_cast<float> (triggerToPlay.midiNote) });
+                }
+            }
             else if (synthForPdPatch (triggerToPlay.pdPatch).isNotEmpty())
-                events.push_back (makePdPatchEvent (triggerToPlay));
+            {
+                events.push_back ({ eventSample, makePdPatchEvent (triggerToPlay) });
+            }
 
             continue;
         }
@@ -472,19 +536,18 @@ void ScDiscAudioEngine::triggerMany (const std::vector<DiscAudioTrigger>& trigge
                                : triggerToPlay.soundElementCount;
 
         for (int i = 0; i < count; ++i)
-            events.push_back (makeNoteEvent (triggerToPlay, i));
+            events.push_back ({ eventSample, makeNoteEvent (triggerToPlay, i) });
     }
-
-    if (events.empty() && ! scheduledSequence)
-        return;
 
     if (! events.empty())
     {
-        embeddedSc.setTransport (currentBpm, tick, true);
-        embeddedSc.enqueue (events);
+        const juce::ScopedLock lock (scheduledEventLock);
+        scheduledEvents.insert (scheduledEvents.end(),
+                                std::make_move_iterator (events.begin()),
+                                std::make_move_iterator (events.end()));
     }
 
-    ++tick;
+    tick.fetch_add (1);
 }
 
 bool ScDiscAudioEngine::triggerPdGui (const juce::String& patch,
@@ -562,12 +625,74 @@ bool ScDiscAudioEngine::runPdMidiOutputSmoke()
     return pdAudio.runMidiOutputSmoke();
 }
 
+void ScDiscAudioEngine::setTempo (double bpm) noexcept
+{
+    const auto safeBpm = juce::jlimit (20.0, 400.0, std::isfinite (bpm) ? bpm : 120.0);
+    currentBpm.store (safeBpm);
+    embeddedSc.setTransport (safeBpm, tick.load(), true);
+}
+
+std::int64_t ScDiscAudioEngine::alignedEventSample (std::int64_t sample) const noexcept
+{
+    constexpr std::int64_t renderQuantum = 64;
+    const auto safeSample = juce::jmax<std::int64_t> (0, sample);
+    return ((safeSample + renderQuantum - 1) / renderQuantum) * renderQuantum;
+}
+
+void ScDiscAudioEngine::suspendScheduledEvents()
+{
+    const auto now = renderedSamples.load();
+    const juce::ScopedLock lock (scheduledEventLock);
+
+    for (auto& event : scheduledEvents)
+    {
+        event.dueSample = juce::jmax<std::int64_t> (0, event.dueSample - now);
+        suspendedEvents.push_back (std::move (event));
+    }
+
+    for (auto& trigger : scheduledPdTriggers)
+    {
+        trigger.dueSample = juce::jmax<std::int64_t> (0, trigger.dueSample - now);
+        suspendedPdTriggers.push_back (std::move (trigger));
+    }
+
+    scheduledEvents.clear();
+    scheduledPdTriggers.clear();
+}
+
+void ScDiscAudioEngine::resumeScheduledEvents()
+{
+    const auto now = renderedSamples.load();
+    const juce::ScopedLock lock (scheduledEventLock);
+
+    for (auto& event : suspendedEvents)
+    {
+        event.dueSample = alignedEventSample (now + event.dueSample);
+        scheduledEvents.push_back (std::move (event));
+    }
+
+    for (auto& trigger : suspendedPdTriggers)
+    {
+        trigger.dueSample = alignedEventSample (now + trigger.dueSample);
+        scheduledPdTriggers.push_back (std::move (trigger));
+    }
+
+    suspendedEvents.clear();
+    suspendedPdTriggers.clear();
+}
+
+void ScDiscAudioEngine::cancelScheduledEvents()
+{
+    const juce::ScopedLock lock (scheduledEventLock);
+    scheduledEvents.clear();
+    scheduledPdTriggers.clear();
+    suspendedEvents.clear();
+    suspendedPdTriggers.clear();
+}
+
 void ScDiscAudioEngine::stopPreview()
 {
-    {
-        const juce::ScopedLock lock (scheduledEventLock);
-        scheduledEvents.clear();
-    }
+    cancelScheduledEvents();
 
     pdAudio.stopAllPatches();
     embeddedSc.stopAll();
@@ -586,14 +711,15 @@ juce::String ScDiscAudioEngine::getStatusText() const
     return embeddedSc.getStatusText() + "  /  " + pdAudio.getStatusText();
 }
 
-bool ScDiscAudioEngine::scheduleScSheet (const DiscAudioTrigger& triggerToPlay)
+bool ScDiscAudioEngine::scheduleScSheet (const DiscAudioTrigger& triggerToPlay, std::int64_t startSample)
 {
+    const auto bpm = currentBpm.load();
     auto score = ScoreDocument::fromValueTree (triggerToPlay.scSheet);
 
     if (score.getNumRows() == 0)
         return false;
 
-    auto preparedEvents = buildScSheetEvents (score, currentBpm, currentSampleRate);
+    auto preparedEvents = buildScSheetEvents (score, bpm, currentSampleRate);
 
     if (preparedEvents.empty())
         return false;
@@ -602,9 +728,9 @@ bool ScDiscAudioEngine::scheduleScSheet (const DiscAudioTrigger& triggerToPlay)
     if (preparedEvents.size() > maxScheduledSheetEvents)
         preparedEvents.resize (maxScheduledSheetEvents);
 
-    const auto sequenceStartSample = renderedSamples.load();
-    const auto baseTick = tick;
-    const auto samplesPerBeat = currentSampleRate * 60.0 / juce::jmax (20.0, currentBpm);
+    const auto sequenceStartSample = alignedEventSample (startSample);
+    const auto baseTick = tick.load();
+    const auto samplesPerBeat = currentSampleRate * 60.0 / juce::jmax (20.0, bpm);
     std::vector<ScheduledEvent> newEvents;
     newEvents.reserve (preparedEvents.size());
 
@@ -627,9 +753,9 @@ bool ScDiscAudioEngine::scheduleScSheet (const DiscAudioTrigger& triggerToPlay)
         fields.parameters["otherSides"] = juce::String (juce::jlimit (3, 8, 3 + juce::jmax (0, sheetEvent.groupIndex)));
         fields.parameters["tip"] = juce::String (juce::jlimit (0, 7, sheetEvent.midi % 8));
         fields.parameters["velocity"] = juce::String (fields.velocity, 3);
-        fields.parameters["tempo"] = juce::String (currentBpm, 3);
+        fields.parameters["tempo"] = juce::String (bpm, 3);
 
-        newEvents.push_back ({ sequenceStartSample + sheetEvent.sample,
+        newEvents.push_back ({ alignedEventSample (sequenceStartSample + sheetEvent.sample),
                                gridcollider::InternalEvent { gridcollider::NoteEvent { fields } } });
     }
 
@@ -640,8 +766,9 @@ bool ScDiscAudioEngine::scheduleScSheet (const DiscAudioTrigger& triggerToPlay)
     return true;
 }
 
-bool ScDiscAudioEngine::scheduleOrcaGrid (const DiscAudioTrigger& triggerToPlay)
+bool ScDiscAudioEngine::scheduleOrcaGrid (const DiscAudioTrigger& triggerToPlay, std::int64_t startSample)
 {
+    const auto bpm = currentBpm.load();
     auto snapshot = triggerToPlay.orcaGrid;
 
     if (snapshot.width <= 0 || snapshot.height <= 0)
@@ -653,9 +780,9 @@ bool ScDiscAudioEngine::scheduleOrcaGrid (const DiscAudioTrigger& triggerToPlay)
     gridcollider::GridInterpreter interpreter;
     constexpr int framesToEvaluate = 64;
     constexpr int ticksPerBeat = 4;
-    const auto samplesPerFrame = currentSampleRate * 60.0 / (currentBpm * static_cast<double> (ticksPerBeat));
-    const auto sequenceStartSample = renderedSamples.load();
-    const auto baseTick = tick;
+    const auto samplesPerFrame = currentSampleRate * 60.0 / (bpm * static_cast<double> (ticksPerBeat));
+    const auto sequenceStartSample = alignedEventSample (startSample);
+    const auto baseTick = tick.load();
     std::vector<ScheduledEvent> newEvents;
 
     for (int frame = 0; frame < framesToEvaluate; ++frame)
@@ -665,7 +792,8 @@ bool ScDiscAudioEngine::scheduleOrcaGrid (const DiscAudioTrigger& triggerToPlay)
         if (evaluation.grid.width > 0 && evaluation.grid.height > 0)
             snapshot = std::move (evaluation.grid);
 
-        const auto dueSample = sequenceStartSample + static_cast<std::int64_t> (std::round (static_cast<double> (frame) * samplesPerFrame));
+        const auto dueSample = alignedEventSample (sequenceStartSample
+                             + static_cast<std::int64_t> (std::round (static_cast<double> (frame) * samplesPerFrame)));
 
         for (auto event : evaluation.events)
         {
@@ -696,10 +824,10 @@ bool ScDiscAudioEngine::scheduleOrcaGrid (const DiscAudioTrigger& triggerToPlay)
     return true;
 }
 
-void ScDiscAudioEngine::enqueueDueScheduledEvents()
+void ScDiscAudioEngine::dispatchDueScheduledEvents (std::int64_t now)
 {
     std::vector<gridcollider::InternalEvent> dueEvents;
-    const auto now = renderedSamples.load();
+    std::vector<ScheduledPdTrigger> duePdTriggers;
 
     {
         const juce::ScopedLock lock (scheduledEventLock);
@@ -719,13 +847,43 @@ void ScDiscAudioEngine::enqueueDueScheduledEvents()
         }
 
         scheduledEvents.erase (write, scheduledEvents.end());
+
+        auto pdWrite = scheduledPdTriggers.begin();
+        for (auto read = scheduledPdTriggers.begin(); read != scheduledPdTriggers.end(); ++read)
+        {
+            if (read->dueSample <= now)
+                duePdTriggers.push_back (std::move (*read));
+            else
+            {
+                if (pdWrite != read)
+                    *pdWrite = std::move (*read);
+                ++pdWrite;
+            }
+        }
+        scheduledPdTriggers.erase (pdWrite, scheduledPdTriggers.end());
     }
 
     if (! dueEvents.empty())
     {
-        embeddedSc.setTransport (currentBpm, tick, true);
+        embeddedSc.setTransport (currentBpm.load(), tick.load(), true);
         embeddedSc.enqueue (dueEvents);
     }
+
+    for (const auto& trigger : duePdTriggers)
+        pdAudio.triggerPatch (trigger.patch, trigger.durationSeconds, trigger.searchPath, trigger.triggerValue);
+}
+
+std::int64_t ScDiscAudioEngine::nextScheduledSampleAfter (std::int64_t now) const
+{
+    auto next = std::numeric_limits<std::int64_t>::max();
+    const juce::ScopedLock lock (scheduledEventLock);
+    for (const auto& event : scheduledEvents)
+        if (event.dueSample > now)
+            next = juce::jmin (next, event.dueSample);
+    for (const auto& trigger : scheduledPdTriggers)
+        if (trigger.dueSample > now)
+            next = juce::jmin (next, trigger.dueSample);
+    return next;
 }
 
 std::uint64_t ScDiscAudioEngine::ticksForSeconds (float seconds) const noexcept
@@ -733,7 +891,7 @@ std::uint64_t ScDiscAudioEngine::ticksForSeconds (float seconds) const noexcept
     if (seconds < 0.0f)
         seconds = 9999.0f;
 
-    const auto beats = static_cast<double> (juce::jlimit (0.25f, 9999.0f, seconds)) * currentBpm / 60.0;
+    const auto beats = static_cast<double> (juce::jlimit (0.25f, 9999.0f, seconds)) * currentBpm.load() / 60.0;
     return static_cast<std::uint64_t> (juce::jmax (1.0, std::ceil (beats)));
 }
 
@@ -852,9 +1010,11 @@ juce::String ScDiscAudioEngine::wrappedPdPatchSource (const juce::String& synthN
 
 gridcollider::InternalEvent ScDiscAudioEngine::makeScProgramEvent (const DiscAudioTrigger& triggerToPlay)
 {
+    const auto bpm = currentBpm.load();
+    const auto eventTick = tick.load();
     gridcollider::EventFields fields;
-    fields.timestampSeconds = static_cast<double> (tick) * 60.0 / currentBpm;
-    fields.tick = tick;
+    fields.timestampSeconds = static_cast<double> (eventTick) * 60.0 / bpm;
+    fields.tick = eventTick;
     fields.sourceCell = { juce::jlimit (0, 63, 18 + triggerToPlay.branchIndex * 3),
                           juce::jlimit (0, 63, 12 + triggerToPlay.depth * 8) };
     fields.instrumentName = synthForProgram (triggerToPlay.scCode);
@@ -868,7 +1028,7 @@ gridcollider::InternalEvent ScDiscAudioEngine::makeScProgramEvent (const DiscAud
     fields.parameters["otherSides"] = "6";
     fields.parameters["tip"] = "0";
     fields.parameters["velocity"] = juce::String (fields.velocity, 3);
-    fields.parameters["tempo"] = juce::String (currentBpm, 3);
+    fields.parameters["tempo"] = juce::String (bpm, 3);
     fields.parameters["pan"] = juce::String (triggerToPlay.pan, 3);
 
     if (triggerToPlay.scDurationSeconds < 0.0f)
@@ -879,9 +1039,11 @@ gridcollider::InternalEvent ScDiscAudioEngine::makeScProgramEvent (const DiscAud
 
 gridcollider::InternalEvent ScDiscAudioEngine::makePdPatchEvent (const DiscAudioTrigger& triggerToPlay)
 {
+    const auto bpm = currentBpm.load();
+    const auto eventTick = tick.load();
     gridcollider::EventFields fields;
-    fields.timestampSeconds = static_cast<double> (tick) * 60.0 / currentBpm;
-    fields.tick = tick;
+    fields.timestampSeconds = static_cast<double> (eventTick) * 60.0 / bpm;
+    fields.tick = eventTick;
     fields.sourceCell = { juce::jlimit (0, 63, 20 + triggerToPlay.branchIndex * 3),
                           juce::jlimit (0, 63, 16 + triggerToPlay.depth * 8) };
     fields.instrumentName = synthForPdPatch (triggerToPlay.pdPatch);
@@ -890,7 +1052,7 @@ gridcollider::InternalEvent ScDiscAudioEngine::makePdPatchEvent (const DiscAudio
     fields.velocity = 0.74f * triggerToPlay.gain;
     fields.durationTicks = ticksForSeconds (triggerToPlay.pdDurationSeconds);
     fields.parameters["velocity"] = juce::String (fields.velocity, 3);
-    fields.parameters["tempo"] = juce::String (currentBpm, 3);
+    fields.parameters["tempo"] = juce::String (bpm, 3);
     fields.parameters["sustain"] = triggerToPlay.pdDurationSeconds < 0.0f
                                        ? "0.42"
                                        : juce::String (triggerToPlay.pdDurationSeconds, 3);
@@ -900,9 +1062,11 @@ gridcollider::InternalEvent ScDiscAudioEngine::makePdPatchEvent (const DiscAudio
 
 gridcollider::InternalEvent ScDiscAudioEngine::makeNoteEvent (const DiscAudioTrigger& triggerToPlay, int elementIndex)
 {
+    const auto bpm = currentBpm.load();
+    const auto eventTick = tick.load();
     gridcollider::EventFields fields;
-    fields.timestampSeconds = static_cast<double> (tick) * 60.0 / currentBpm;
-    fields.tick = tick + static_cast<std::uint64_t> (elementIndex);
+    fields.timestampSeconds = static_cast<double> (eventTick) * 60.0 / bpm;
+    fields.tick = eventTick + static_cast<std::uint64_t> (elementIndex);
     fields.sourceCell = { juce::jlimit (0, 63, 8 + triggerToPlay.branchIndex * 5 + elementIndex),
                           juce::jlimit (0, 63, 8 + triggerToPlay.depth * 9) };
     fields.instrumentName = triggerToPlay.nestedWorldPulse
@@ -917,7 +1081,7 @@ gridcollider::InternalEvent ScDiscAudioEngine::makeNoteEvent (const DiscAudioTri
     fields.parameters["otherSides"] = juce::String (juce::jlimit (3, 8, 4 + triggerToPlay.depth));
     fields.parameters["tip"] = juce::String (juce::jlimit (0, 7, elementIndex));
     fields.parameters["velocity"] = juce::String (fields.velocity, 3);
-    fields.parameters["tempo"] = juce::String (currentBpm, 3);
+    fields.parameters["tempo"] = juce::String (bpm, 3);
     fields.parameters["pan"] = juce::String (triggerToPlay.pan, 3);
 
     ++triggerCounter;

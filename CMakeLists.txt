@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.7.5 LANGUAGES C CXX)
+project(Blendings VERSION 0.7.6 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -240,7 +240,7 @@ endif()
 
 enable_testing()
 add_test(NAME PlaybackEndToEndSmoke
-    COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Demos/Glass Circuit.otherware")
+    COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Demos/Demo1.otherware")
 
 add_executable(SCAudioSmoke EXCLUDE_FROM_ALL
     Source/EmbeddedScAudioEngine.cpp

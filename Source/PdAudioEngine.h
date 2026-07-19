@@ -24,6 +24,7 @@ public:
     bool prepare (double sampleRate, int maximumBlockSize, int outputChannels, int inputChannels = 0);
     void release() noexcept;
     void renderAndAdd (juce::AudioBuffer<float>& output, const juce::AudioBuffer<float>* input = nullptr);
+    bool preparePatch (const juce::String& patch, const juce::String& searchPath = {});
     bool triggerPatch (const juce::String& patch, float durationSeconds, const juce::String& searchPath = {}, float triggerValue = -1.0f);
     bool sendGuiValue (const juce::String& patch, const juce::String& receiver, float value, bool bangOnly, float durationSeconds, const juce::String& searchPath = {});
     bool sendMessage (const juce::String& patch, const juce::String& receiver, const juce::String& selector, const juce::StringArray& atoms, float durationSeconds, const juce::String& searchPath = {});
@@ -60,6 +61,7 @@ private:
     int maximumBlockSize = 512;
     int nextPatchId = 1;
     std::int64_t renderedSamples = 0;
+    std::int64_t lastAudibleSample = 0;
     void* pdInstance = nullptr;
     bool ready = false;
     juce::String lastError;

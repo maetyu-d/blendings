@@ -20,6 +20,7 @@ std::unique_ptr<juce::Component> createPipeWorkspaceComponent();
 juce::var createPipeWorkspaceState (juce::Component& component);
 bool applyPipeWorkspaceState (juce::Component& component, const juce::var& state);
 void setPipeWorkspaceTempo (juce::Component& component, double bpm);
+void setPipeWorkspaceSampleClock (juce::Component& component, std::function<double()> clockSeconds);
 void setPipeWorkspaceRunning (juce::Component& component, bool running);
 void setPipeWorkspaceChangeCallback (juce::Component& component, std::function<void()> callback);
 void setPipeWorkspaceDiscTriggerCallback (juce::Component& component,

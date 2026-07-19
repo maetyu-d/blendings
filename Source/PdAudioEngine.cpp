@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cmath>
 #include <cstdlib>
+#include <numeric>
 
 #if OTHERWARE_HAS_LIBPD
 extern "C"
@@ -326,6 +327,7 @@ bool PdAudioEngine::prepare (double sampleRate, int maxBlockSize, int outputChan
     lastError.clear();
     lastWarning.clear();
     renderedSamples = 0;
+    lastAudibleSample = 0;
 
 #if OTHERWARE_HAS_LIBPD
     libpd_init();
@@ -430,6 +432,7 @@ void PdAudioEngine::release() noexcept
     lastWarning.clear();
     nextPatchId = 1;
     renderedSamples = 0;
+    lastAudibleSample = 0;
 }
 
 void PdAudioEngine::stopAllPatches()
@@ -451,6 +454,7 @@ void PdAudioEngine::stopAllPatches()
     pdInput.clear();
     pendingPdOutput.clear();
     pendingPdFrames = 0;
+    lastAudibleSample = renderedSamples;
     lastWarning.clear();
 }
 
@@ -509,6 +513,13 @@ void PdAudioEngine::renderAndAdd (juce::AudioBuffer<float>& output, const juce::
             return;
         }
 
+        const auto peak = std::accumulate (pdOutput.begin(),
+                                           pdOutput.begin() + static_cast<std::ptrdiff_t> (requiredSamples),
+                                           0.0f,
+                                           [] (float current, float value) { return juce::jmax (current, std::abs (value)); });
+        if (peak > 0.00001f)
+            lastAudibleSample = renderedSamples + pendingPdFrames + renderedFrames;
+
         pendingPdOutput.insert (pendingPdOutput.end(),
                                 pdOutput.begin(),
                                 pdOutput.begin() + static_cast<std::ptrdiff_t> (requiredSamples));
@@ -534,6 +545,22 @@ void PdAudioEngine::renderAndAdd (juce::AudioBuffer<float>& output, const juce::
 #else
     juce::ignoreUnused (output);
 #endif
+}
+
+bool PdAudioEngine::preparePatch (const juce::String& patch, const juce::String& searchPath)
+{
+    const auto trimmed = patch.trim();
+    if (trimmed.isEmpty())
+        return false;
+
+    const juce::ScopedLock scopedLock (lock);
+    if (! ready)
+        return false;
+
+    setCurrentInstanceIfNeeded();
+    // Values below -1 mean "load only": preserve the lifetime of an already
+    // sounding instance while preparing a future sample-aligned retrigger.
+    return findOrLoadPatchLocked (trimmed, searchPath.trim(), -2.0f) != nullptr;
 }
 
 bool PdAudioEngine::triggerPatch (const juce::String& patch, float durationSeconds, const juce::String& searchPath, float triggerValue)
@@ -952,7 +979,7 @@ PdAudioEngine::LoadedPatch* PdAudioEngine::findOrLoadPatchLocked (const juce::St
         const auto durationSamples = static_cast<std::int64_t> (std::ceil (static_cast<double> (durationSeconds) * currentSampleRate));
         existing->second.stopSample = renderedSamples + juce::jmax<std::int64_t> (1, durationSamples);
     }
-    else
+    else if (durationSeconds >= -1.0f)
     {
         existing->second.stopSample = -1;
     }
@@ -1031,7 +1058,10 @@ void PdAudioEngine::unloadExpiredPatchesLocked()
 
     while (it != loadedPatches.end())
     {
-        if (it->second.stopSample >= 0 && renderedSamples >= it->second.stopSample)
+        const auto tailSilenceSamples = static_cast<std::int64_t> (std::ceil (currentSampleRate * 2.0));
+        if (it->second.stopSample >= 0
+            && renderedSamples >= it->second.stopSample
+            && renderedSamples - lastAudibleSample >= tailSilenceSamples)
         {
             closePatchLocked (it->second);
             it = loadedPatches.erase (it);
@@ -1043,11 +1073,7 @@ void PdAudioEngine::unloadExpiredPatchesLocked()
         }
     }
 
-    if (expiredAnyPatch)
-    {
-        pendingPdOutput.clear();
-        pendingPdFrames = 0;
-    }
+    juce::ignoreUnused (expiredAnyPatch);
 #endif
 }
 

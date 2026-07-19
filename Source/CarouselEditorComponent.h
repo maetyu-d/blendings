@@ -48,6 +48,7 @@ public:
     void setDocument (const CarouselDocument&);
     [[nodiscard]] CarouselDocument getDocument() const { return document; }
     void setRunning (bool);
+    void setSampleClock (std::function<double()> clockSeconds);
     [[nodiscard]] bool isRunning() const noexcept { return running; }
     std::function<void(const CarouselDocument&)> onChange;
     std::function<void(const CarouselDocument::Item&)> onTone;
@@ -80,6 +81,7 @@ private:
     bool restoringHistory = false, dragHistoryStarted = false, dragDetachedFromParent = false;
     bool sliderHistoryStarted = false;
     double lastTime = 0.0;
+    std::function<double()> sampleClockSeconds;
     float zoom = 1.0f;
     juce::Point<float> pan, panStart, mouseStart, dragOffset;
     std::set<juce::String> contacts;
@@ -99,6 +101,7 @@ private:
                 attachmentLabel, attachmentSummaryLabel;
 
     void timerCallback() override;
+    [[nodiscard]] double currentClockMs() const;
     void changed();
     void pushUndoState();
     void refreshAttachmentInspector();

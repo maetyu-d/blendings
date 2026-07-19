@@ -1032,6 +1032,12 @@ public:
         flowBeatsPerGridUnit = juce::jmax (1.0 / 16.0, beatsPerGridUnit);
     }
 
+    void setFlowSampleClock (std::function<double()> clockSeconds)
+    {
+        flowClockSeconds = std::move (clockSeconds);
+        lastFlowTimeMs = currentFlowClockMs();
+    }
+
     using ClockBank = std::array<SequencingClock, 4>;
 
     const ClockBank& getSequencingClocks() const noexcept { return sequencingClocks; }
@@ -1054,7 +1060,7 @@ public:
     void setFlowRunning (bool shouldRun)
     {
         flowRunning = shouldRun;
-        lastFlowTimeMs = juce::Time::getMillisecondCounterHiRes();
+        lastFlowTimeMs = currentFlowClockMs();
         if (flowRunning && flowPulses.empty()) resetFlowPulses();
         repaint();
     }
@@ -1063,7 +1069,7 @@ public:
     {
         flowRunning = false;
         resetFlowPulses();
-        lastFlowTimeMs = juce::Time::getMillisecondCounterHiRes();
+        lastFlowTimeMs = currentFlowClockMs();
         repaint();
     }
 
@@ -1163,13 +1169,23 @@ public:
         return {};
     }
 
-    bool selectDiscForFlow (int index)
+    bool performWithDiscForPlayback (int index, const std::function<void()>& action)
     {
         if (! juce::isPositiveAndBelow (index, static_cast<int> (discs().size()))) return false;
+
+        const auto previousDisc = selectedDisc;
+        const auto previousRoute = selectedRoute;
+        const auto previousNode = selectedNode;
         selectedDisc = index;
         selectedRoute = -1;
         selectedNode = -1;
-        notifySelectionChanged();
+
+        if (action != nullptr)
+            action();
+
+        selectedDisc = previousDisc;
+        selectedRoute = previousRoute;
+        selectedNode = previousNode;
         repaint();
         return true;
     }
@@ -3775,6 +3791,7 @@ private:
     double flowBpm = 120.0;
     double flowBeatsPerGridUnit = 1.0;
     double lastFlowTimeMs = 0.0;
+    std::function<double()> flowClockSeconds;
     double lastFlowUpdateMs = 0.0;
     size_t lastContactChecks = 0;
     size_t lastStressWorkUnits = 0;
@@ -6630,12 +6647,20 @@ private:
         }
     }
 
+    double currentFlowClockMs() const
+    {
+        return flowClockSeconds ? flowClockSeconds() * 1000.0
+                                : juce::Time::getMillisecondCounterHiRes();
+    }
+
     void timerCallback() override
     {
         const auto updateStarted = juce::Time::getMillisecondCounterHiRes();
-        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const auto now = currentFlowClockMs();
+        if (now < lastFlowTimeMs)
+            lastFlowTimeMs = now;
         const auto elapsed = lastFlowTimeMs > 0.0 ? juce::jlimit (0.0, 0.1, (now - lastFlowTimeMs) / 1000.0) : 0.0;
-        lastFlowTimeMs = now;
+        lastFlowTimeMs += elapsed * 1000.0;
         if (! flowRunning || elapsed <= 0.0) { lastFlowUpdateMs = 0.0; lastContactChecks = 0; return; }
         flowBeatPosition += elapsed * flowBpm / 60.0;
         emitDueTapDrops();
@@ -9579,6 +9604,10 @@ public:
         : canvas (canvasToUse), handle (std::move (handleToUse)), index (indexToUse), onChange (std::move (changed))
     {
         addAndMakeVisible (editor);
+        editor.setSampleClock ([&audio]
+        {
+            return static_cast<double> (audio.getRenderedSamplePosition()) / juce::jmax (1.0, audio.getSampleRate());
+        });
         editor.setDocument (canvas.getDiscCarousel (handle, index));
         editor.onChange = [this] (const CarouselDocument& document)
         {
@@ -11120,12 +11149,18 @@ public:
         };
         canvas.onDiscPlaybackActive = [this] (const juce::String& key)
         {
-            const auto now = juce::Time::getMillisecondCounterHiRes();
+            const auto now = scAudio.getRenderedSamplePosition();
             return std::any_of (activeDiscs.begin(), activeDiscs.end(), [&] (const auto& active)
             {
-                return active.key == key && (! std::isfinite (active.untilMs) || active.untilMs > now);
+                return active.key == key
+                    && (active.untilSample == std::numeric_limits<std::int64_t>::max() || active.untilSample > now);
             });
         };
+        canvas.setFlowSampleClock ([this]
+        {
+            return static_cast<double> (scAudio.getRenderedSamplePosition())
+                 / juce::jmax (1.0, scAudio.getSampleRate());
+        });
         canvas.setFlowTiming (globalTempoBpm, beatsForGridChoice (gridUnitChoice));
         updateStatus();
         refreshDataPane();
@@ -11153,7 +11188,7 @@ public:
                 midiOutputs[static_cast<size_t> (port)]->sendMessageNow (message);
         });
 
-        startTimerHz (10);
+        startTimerHz (60);
 
 #if JUCE_MAC
         applicationMenu.addItem (menuAbout, "About Blendings");
@@ -11207,6 +11242,8 @@ public:
         scratchAudio.setSize (juce::jmax (2, outputChannels), safeBlockSize, false, false, false);
         scratchInput.setSize (std::max ({ 2, outputChannels, inputChannels }), safeBlockSize, false, false, false);
         scAudio.prepare (safeRate, safeBlockSize, outputChannels, inputChannels);
+        scAudio.setTempo (globalTempoBpm);
+        transportStartedAtSample = scAudio.getRenderedSamplePosition();
         juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer<MainComponent> (this)]
         {
             if (safeThis != nullptr)
@@ -12036,7 +12073,7 @@ private:
     CarouselEditorPanel* carouselPanel = nullptr;
     std::vector<std::unique_ptr<CarouselEditorComponent>> carouselRuntimes;
     std::vector<std::unique_ptr<juce::Component>> pipeRuntimes;
-    struct ActiveDisc { juce::String key; double untilMs = 0.0; };
+    struct ActiveDisc { juce::String key; std::int64_t untilSample = 0; };
     std::vector<ActiveDisc> activeDiscs;
     struct DiscSequenceState { juce::String key; int nextElement = 0; };
     std::vector<DiscSequenceState> discSequenceStates;
@@ -12047,7 +12084,7 @@ private:
         std::vector<CarouselDocument> carousels;
         std::vector<juce::String> pipeStates;
         int nextElement = 0;
-        double nextTimeMs = 0.0;
+        std::int64_t nextSample = 0;
     };
     std::vector<PendingElementChain> pendingElementChains;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
@@ -12117,10 +12154,9 @@ private:
     bool compactDiscs = false;
     bool flowDebugVisible = false;
     int triggerQuantizeChoice = 0;
-    double transportElapsedSeconds = 0.0;
-    double lastTransportTimeMs = 0.0;
-    struct PendingDiscTrigger { int discIndex = -1; double dueBeat = 0.0; };
-    std::vector<PendingDiscTrigger> pendingDiscTriggers;
+    std::int64_t transportElapsedSamples = 0;
+    std::int64_t transportStartedAtSample = 0;
+    std::int64_t transportPausedAtSample = -1;
 
     juce::Array<juce::File> recentProjectFiles()
     {
@@ -12249,30 +12285,59 @@ private:
         if (transportRunning == shouldRun)
             return;
 
-        const auto now = juce::Time::getMillisecondCounterHiRes();
-        if (transportRunning && lastTransportTimeMs > 0.0)
-            transportElapsedSeconds += juce::jmax (0.0, (now - lastTransportTimeMs) / 1000.0);
+        const auto now = scAudio.getRenderedSamplePosition();
+        if (transportRunning)
+            transportElapsedSamples += juce::jmax<std::int64_t> (0, now - transportStartedAtSample);
 
         transportRunning = shouldRun;
-        lastTransportTimeMs = now;
+        transportStartedAtSample = now;
+        if (! transportRunning)
+        {
+            // Keep future starts parked while already sounding voices finish naturally.
+            transportPausedAtSample = now;
+            scAudio.suspendScheduledEvents();
+        }
+        else if (transportPausedAtSample >= 0)
+        {
+            const auto pausedSamples = juce::jmax<std::int64_t> (0, now - transportPausedAtSample);
+            for (auto& chain : pendingElementChains)
+                if (chain.nextElement >= 0)
+                    chain.nextSample += pausedSamples;
+            for (auto& active : activeDiscs)
+                if (active.untilSample != std::numeric_limits<std::int64_t>::max()
+                    && active.untilSample > transportPausedAtSample)
+                    active.untilSample += pausedSamples;
+            scAudio.resumeScheduledEvents();
+            transportPausedAtSample = -1;
+        }
+        for (auto& runtime : carouselRuntimes)
+            runtime->setRunning (transportRunning);
+        for (auto& runtime : pipeRuntimes)
+            otherware::setPipeWorkspaceRunning (*runtime, transportRunning);
         canvas.setFlowRunning (transportRunning);
         flowButton.setToggleState (transportRunning, juce::dontSendNotification);
-        pauseButton.setToggleState (! transportRunning && transportElapsedSeconds > 0.0, juce::dontSendNotification);
+        pauseButton.setToggleState (! transportRunning && transportElapsedSamples > 0, juce::dontSendNotification);
         updateElapsedTimeLabel();
+    }
+
+    std::int64_t currentTransportSamples() const
+    {
+        auto elapsed = transportElapsedSamples;
+        if (transportRunning)
+            elapsed += juce::jmax<std::int64_t> (0, scAudio.getRenderedSamplePosition() - transportStartedAtSample);
+        return elapsed;
     }
 
     double currentTransportBeat() const
     {
-        auto elapsed = transportElapsedSeconds;
-        if (transportRunning && lastTransportTimeMs > 0.0)
-            elapsed += juce::jmax (0.0, (juce::Time::getMillisecondCounterHiRes() - lastTransportTimeMs) / 1000.0);
-        return elapsed * globalTempoBpm / 60.0;
+        return static_cast<double> (currentTransportSamples()) / juce::jmax (1.0, scAudio.getSampleRate())
+             * globalTempoBpm / 60.0;
     }
 
-    void fireFlowDiscNow (int discIndex)
+    void fireFlowDiscNow (int discIndex, std::int64_t dueSample = -1)
     {
         canvas.flashDiscForFlow (discIndex);
-        if (canvas.selectDiscForFlow (discIndex)) fireSelectedDisc();
+        canvas.performWithDiscForPlayback (discIndex, [this, dueSample] { fireSelectedDisc (dueSample); });
     }
 
     void scheduleDiscTrigger (int discIndex)
@@ -12283,22 +12348,25 @@ private:
         const auto beat = currentTransportBeat();
         const auto boundary = std::ceil ((beat - 0.0001) / interval) * interval;
         if (boundary <= beat + 0.0001) { fireFlowDiscNow (discIndex); return; }
-        pendingDiscTriggers.push_back ({ discIndex, boundary });
+        const auto samplesPerBeat = scAudio.getSampleRate() * 60.0 / globalTempoBpm;
+        const auto dueSample = scAudio.getRenderedSamplePosition()
+                             + static_cast<std::int64_t> (std::llround ((boundary - beat) * samplesPerBeat));
+        fireFlowDiscNow (discIndex, scAudio.alignedEventSample (dueSample));
     }
 
     void resetTransport()
     {
         transportRunning = false;
-        transportElapsedSeconds = 0.0;
-        lastTransportTimeMs = juce::Time::getMillisecondCounterHiRes();
+        transportElapsedSamples = 0;
+        transportStartedAtSample = scAudio.getRenderedSamplePosition();
+        transportPausedAtSample = -1;
         canvas.resetFlowToStart();
         flowButton.setToggleState (false, juce::dontSendNotification);
         pauseButton.setToggleState (false, juce::dontSendNotification);
         stopButton.setToggleState (false, juce::dontSendNotification);
         discSequenceStates.clear();
         pendingElementChains.clear();
-        pendingDiscTriggers.clear();
-        stopPreviewAudio();
+        stopPreviewAudio (true);
         updateElapsedTimeLabel();
     }
 
@@ -12317,21 +12385,18 @@ private:
         if (performanceDiagnosticsVisible)
             performanceDiagnosticsPanel.setDiagnostics (canvas.getPerformanceSnapshot(), audioCallbackLoadPercent.load());
         masterLevelLeft.store (masterLevelLeft.load() * 0.82f); masterLevelRight.store (masterLevelRight.load() * 0.82f);
-        const auto now = juce::Time::getMillisecondCounterHiRes();
-        const auto beat = currentTransportBeat();
-        for (auto& pending : pendingDiscTriggers)
-            if (pending.discIndex >= 0 && pending.dueBeat <= beat + 0.0001)
-            { fireFlowDiscNow (pending.discIndex); pending.discIndex = -1; }
-        pendingDiscTriggers.erase (std::remove_if (pendingDiscTriggers.begin(), pendingDiscTriggers.end(), [] (const auto& pending) { return pending.discIndex < 0; }), pendingDiscTriggers.end());
-        for (auto& chain : pendingElementChains)
-        {
-            if (chain.nextElement < 0 || chain.nextTimeMs > now) continue;
-            const auto duration = dispatchChainElement (chain);
-            if (! std::isfinite (duration) || chain.nextElement >= static_cast<int> (chain.triggers.size() + chain.carousels.size() + chain.pipeStates.size()))
-                chain.nextElement = -1;
-            else
-                chain.nextTimeMs = now + duration * 1000.0;
-        }
+        const auto now = scAudio.getRenderedSamplePosition();
+        if (transportRunning)
+            for (auto& chain : pendingElementChains)
+            {
+                if (chain.nextElement < 0 || chain.nextSample > now) continue;
+                const auto dueSample = chain.nextSample;
+                const auto duration = dispatchChainElement (chain, dueSample);
+                if (! std::isfinite (duration) || chain.nextElement >= static_cast<int> (chain.triggers.size() + chain.carousels.size() + chain.pipeStates.size()))
+                    chain.nextElement = -1;
+                else
+                    chain.nextSample = dueSample + static_cast<std::int64_t> (std::llround (duration * scAudio.getSampleRate()));
+            }
         pendingElementChains.erase (std::remove_if (pendingElementChains.begin(), pendingElementChains.end(), [] (const auto& chain)
         {
             return chain.nextElement < 0;
@@ -12363,12 +12428,12 @@ private:
         return duration;
     }
 
-    double dispatchChainElement (PendingElementChain& chain)
+    double dispatchChainElement (PendingElementChain& chain, std::int64_t dueSample)
     {
         auto index = chain.nextElement++;
         if (index < static_cast<int> (chain.triggers.size()))
         {
-            scAudio.trigger (chain.triggers[static_cast<size_t> (index)]);
+            scAudio.scheduleTriggerManyAtSample ({ chain.triggers[static_cast<size_t> (index)] }, dueSample);
             return triggerDurationSeconds (chain.triggers[static_cast<size_t> (index)]);
         }
         index -= static_cast<int> (chain.triggers.size());
@@ -12376,6 +12441,10 @@ private:
         {
             carouselRuntimes.clear();
             auto runtime = std::make_unique<CarouselEditorComponent>();
+            runtime->setSampleClock ([this]
+            {
+                return static_cast<double> (scAudio.getRenderedSamplePosition()) / juce::jmax (1.0, scAudio.getSampleRate());
+            });
             runtime->setDocument (chain.carousels[static_cast<size_t> (index)]);
             runtime->onTone = [this] (const CarouselDocument::Item& tone) { triggerCarouselTone (scAudio, tone); };
             runtime->setRunning (true);
@@ -12387,6 +12456,10 @@ private:
         {
             pipeRuntimes.clear();
             auto runtime = otherware::createPipeWorkspaceComponent();
+            otherware::setPipeWorkspaceSampleClock (*runtime, [this]
+            {
+                return static_cast<double> (scAudio.getRenderedSamplePosition()) / juce::jmax (1.0, scAudio.getSampleRate());
+            });
             otherware::setPipeWorkspaceDiscTriggerCallback (*runtime, [this] (const auto& disc) { triggerPipeWorldDisc (scAudio, disc); });
             otherware::setPipeWorkspaceTempo (*runtime, globalTempoBpm);
             const auto& stateText = chain.pipeStates[static_cast<size_t> (index)];
@@ -12399,9 +12472,7 @@ private:
 
     void updateElapsedTimeLabel()
     {
-        auto elapsed = transportElapsedSeconds;
-        if (transportRunning && lastTransportTimeMs > 0.0)
-            elapsed += juce::jmax (0.0, (juce::Time::getMillisecondCounterHiRes() - lastTransportTimeMs) / 1000.0);
+        const auto elapsed = static_cast<double> (currentTransportSamples()) / juce::jmax (1.0, scAudio.getSampleRate());
 
         const auto totalSeconds = juce::jmax (0, static_cast<int> (std::floor (elapsed)));
         const auto minutes = totalSeconds / 60;
@@ -12411,13 +12482,16 @@ private:
                                   juce::dontSendNotification);
     }
 
-    void stopPreviewAudio()
+    void stopPreviewAudio (bool preserveTails = false)
     {
         carouselRuntimes.clear();
         pipeRuntimes.clear();
         activeDiscs.clear();
         pendingElementChains.clear();
-        scAudio.stopPreview();
+        if (preserveTails)
+            scAudio.cancelScheduledEvents();
+        else
+            scAudio.stopPreview();
         updateStatus();
     }
 
@@ -13461,6 +13535,10 @@ private:
         }
 
         auto workspace = otherware::createPipeWorkspaceComponent();
+        otherware::setPipeWorkspaceSampleClock (*workspace, [this]
+        {
+            return static_cast<double> (scAudio.getRenderedSamplePosition()) / juce::jmax (1.0, scAudio.getSampleRate());
+        });
         pipeElementComponent = workspace.get();
         pipeElementHandle = handle;
         pipeElementIndex = index;
@@ -13676,7 +13754,7 @@ private:
             statusLabel.setText ("Already at root world", juce::dontSendNotification);
     }
 
-    void fireSelectedDisc()
+    void fireSelectedDisc (std::int64_t requestedSample = -1)
     {
         const auto info = canvas.getSelectedDiscInfo();
         if (! canvas.isSelectedDiscAudible())
@@ -13689,10 +13767,13 @@ private:
         juce::String discKey;
         for (const auto index : handle.worldPath) discKey << index << "/";
         discKey << handle.discIndex;
-        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const auto now = scAudio.getRenderedSamplePosition();
+        const auto dueSample = requestedSample >= 0
+                                 ? scAudio.alignedEventSample (requestedSample)
+                                 : scAudio.alignedEventSample (now);
         activeDiscs.erase (std::remove_if (activeDiscs.begin(), activeDiscs.end(), [now] (const auto& active)
         {
-            return std::isfinite (active.untilMs) && active.untilMs <= now;
+            return active.untilSample != std::numeric_limits<std::int64_t>::max() && active.untilSample <= now;
         }), activeDiscs.end());
 
         if (info.triggerMode == static_cast<int> (Disc::TriggerMode::whenFinished))
@@ -13751,17 +13832,21 @@ private:
         }
 
         if (info.triggerMode == static_cast<int> (Disc::TriggerMode::exclusive))
-            stopPreviewAudio();
+            stopPreviewAudio (true);
 
         std::vector<DiscAudioTrigger> selectedTriggers;
         for (size_t i = 0; i < triggers.size(); ++i)
             if (shouldFire[i]) selectedTriggers.push_back (triggers[i]);
-        scAudio.triggerMany (selectedTriggers);
+        scAudio.scheduleTriggerManyAtSample (selectedTriggers, dueSample);
         carouselRuntimes.clear();
         for (size_t i = 0; i < carouselDocuments.size(); ++i)
         {
             if (! shouldFire[triggers.size() + i]) continue;
             auto runtime = std::make_unique<CarouselEditorComponent>();
+            runtime->setSampleClock ([this]
+            {
+                return static_cast<double> (scAudio.getRenderedSamplePosition()) / juce::jmax (1.0, scAudio.getSampleRate());
+            });
             runtime->setDocument (carouselDocuments[i]);
             runtime->onTone = [this] (const CarouselDocument::Item& tone) { triggerCarouselTone (scAudio, tone); };
             runtime->setRunning (true);
@@ -13774,6 +13859,10 @@ private:
             if (! shouldFire[triggers.size() + carouselDocuments.size() + i]) continue;
             const auto& stateText = pipeStates[i];
             auto runtime = otherware::createPipeWorkspaceComponent();
+            otherware::setPipeWorkspaceSampleClock (*runtime, [this]
+            {
+                return static_cast<double> (scAudio.getRenderedSamplePosition()) / juce::jmax (1.0, scAudio.getSampleRate());
+            });
             otherware::setPipeWorkspaceDiscTriggerCallback (*runtime, [this] (const auto& disc) { triggerPipeWorldDisc (scAudio, disc); });
             otherware::setPipeWorkspaceTempo (*runtime, globalTempoBpm);
             if (stateText.isNotEmpty()) otherware::applyPipeWorkspaceState (*runtime, juce::JSON::parse (stateText));
@@ -13784,15 +13873,27 @@ private:
 
         if (mode == Disc::ElementMode::chain && elementCount > 1)
         {
-            const auto firstDuration = ! triggers.empty() ? triggerDurationSeconds (triggers.front())
-                                                          : std::numeric_limits<double>::infinity();
             pendingElementChains.erase (std::remove_if (pendingElementChains.begin(), pendingElementChains.end(), [&discKey] (const auto& chain)
             {
                 return chain.key == discKey;
             }), pendingElementChains.end());
-            if (std::isfinite (firstDuration))
-                pendingElementChains.push_back ({ discKey, triggers, carouselDocuments, pipeStates, 1,
-                                                  now + firstDuration * 1000.0 });
+
+            auto nextSample = dueSample;
+            auto chainCanContinue = ! triggers.empty();
+            for (size_t triggerIndex = 0; triggerIndex < triggers.size() && chainCanContinue; ++triggerIndex)
+            {
+                if (triggerIndex > 0)
+                    scAudio.scheduleTriggerManyAtSample ({ triggers[triggerIndex] }, nextSample);
+
+                const auto duration = triggerDurationSeconds (triggers[triggerIndex]);
+                chainCanContinue = std::isfinite (duration);
+                if (chainCanContinue)
+                    nextSample += static_cast<std::int64_t> (std::llround (duration * scAudio.getSampleRate()));
+            }
+
+            if (chainCanContinue && (! carouselDocuments.empty() || ! pipeStates.empty()))
+                pendingElementChains.push_back ({ discKey, triggers, carouselDocuments, pipeStates,
+                                                  static_cast<int> (triggers.size()), nextSample });
         }
 
         auto durationSeconds = 0.45;
@@ -13827,8 +13928,8 @@ private:
         {
             return item.key == discKey;
         }), activeDiscs.end());
-        activeDiscs.push_back ({ discKey, indefinite ? std::numeric_limits<double>::infinity()
-                                                     : now + durationSeconds * 1000.0 });
+        activeDiscs.push_back ({ discKey, indefinite ? std::numeric_limits<std::int64_t>::max()
+                                                     : dueSample + static_cast<std::int64_t> (std::llround (durationSeconds * scAudio.getSampleRate())) });
         statusLabel.setText ("Fired disc  /  " + scAudio.getStatusText(), juce::dontSendNotification);
     }
 
@@ -13871,6 +13972,7 @@ private:
         if (std::abs (newTempo - globalTempoBpm) < 0.001) return;
         globalTempoBpm = newTempo;
         canvas.setFlowTiming (globalTempoBpm, beatsForGridChoice (gridUnitChoice));
+        scAudio.setTempo (globalTempoBpm);
         markProjectDirty();
     }
 
@@ -13884,6 +13986,7 @@ private:
         gridUnitBox.setSelectedId (gridUnitChoice, juce::dontSendNotification);
         triggerQuantizeSlider.setValue (triggerQuantizeChoice, juce::dontSendNotification);
         canvas.setFlowTiming (globalTempoBpm, beatsForGridChoice (gridUnitChoice));
+        scAudio.setTempo (globalTempoBpm);
         masterGain.store (juce::jlimit (0.0f, 1.5f, static_cast<float> (project.getProperty ("masterGain", 1.0f))));
         refreshClockButton();
     }
@@ -14215,6 +14318,17 @@ int main (int argc, char** argv)
     {
         std::fprintf (stderr, "Playback smoke: demo project could not be loaded\n");
         return 3;
+    }
+
+    const auto selectionBeforePlayback = canvas.getSelectedDiscHandle();
+    auto playbackDiscWasAvailable = false;
+    if (! canvas.performWithDiscForPlayback (0, [&] { playbackDiscWasAvailable = canvas.getSelectedDiscInfo().valid; })
+        || ! playbackDiscWasAvailable
+        || canvas.getSelectedDiscHandle().discIndex != selectionBeforePlayback.discIndex
+        || canvas.getSelectedDiscHandle().worldPath != selectionBeforePlayback.worldPath)
+    {
+        std::fprintf (stderr, "Playback smoke: firing a disc changed the user's selection\n");
+        return 4;
     }
 
     const auto savedState = canvas.projectStateForTesting();

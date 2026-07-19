@@ -6445,6 +6445,7 @@ int main()
     nonMultipleBlockEngine.render (nonMultipleBlockBuffer);
 
     auto nonMultipleBlockTailPeak = 0.0f;
+    const auto boundarySample = nonMultipleBlockBuffer.getSample (0, 0);
 
     for (int channel = 0; channel < nonMultipleBlockBuffer.getNumChannels(); ++channel)
     {
@@ -6456,9 +6457,10 @@ int main()
 
     nonMultipleBlockEngine.release();
 
-    if (nonMultipleBlockPeak <= 0.0005f || nonMultipleBlockTailPeak > 0.0001f)
+    if (nonMultipleBlockPeak <= 0.0005f || nonMultipleBlockTailPeak <= 0.0005f
+        || ! std::isfinite (boundarySample))
     {
-        std::cerr << "Pd non-multiple host buffer fixture failed; peak="
+        std::cerr << "Pd non-multiple host buffer continuity failed; peak="
                   << nonMultipleBlockPeak << " tail=" << nonMultipleBlockTailPeak << '\n';
         return 45;
     }
