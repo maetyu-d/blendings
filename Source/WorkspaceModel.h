@@ -213,6 +213,7 @@ struct Modulator
 
 struct ModulationConnection
 {
+    enum class Curve { linear = 0, easeIn, easeOut, smooth };
     juce::String sourceId;
     ModulationTargetKind targetKind = ModulationTargetKind::disc;
     juce::String targetId;
@@ -221,6 +222,8 @@ struct ModulationConnection
     double offset = 0.0;
     double smoothingBeats = 0.0;
     bool inverted = false;
+    bool enabled = true;
+    Curve curve = Curve::linear;
 };
 
 juce::String modulationTargetName (ModulationTargetKind kind);

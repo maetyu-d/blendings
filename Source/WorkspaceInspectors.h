@@ -317,6 +317,24 @@ public:
         parameter.onChange = [this] { value.parameter = juce::jmax (0, parameter.getSelectedId() - 1); notify(); };
         addAndMakeVisible (parameter);
 
+        enabled.setButtonText ("Route enabled");
+        enabled.setToggleState (value.enabled, juce::dontSendNotification);
+        enabled.setColour (juce::ToggleButton::textColourId, textPrimary());
+        enabled.onClick = [this] { value.enabled = enabled.getToggleState(); notify(); updateEnabledState(); };
+        addAndMakeVisible (enabled);
+
+        styleEditorLabel (curveLabel, 12.0f, false);
+        curveLabel.setText ("Response", juce::dontSendNotification);
+        addAndMakeVisible (curveLabel);
+        curve.addItemList ({ "Linear", "Ease in", "Ease out", "Smooth S-curve" }, 1);
+        curve.setSelectedId (static_cast<int> (value.curve) + 1, juce::dontSendNotification);
+        curve.onChange = [this]
+        {
+            value.curve = static_cast<ModulationConnection::Curve> (juce::jlimit (0, 3, curve.getSelectedId() - 1));
+            notify();
+        };
+        addAndMakeVisible (curve);
+
         styleEditorLabel (depthLabel, 12.0f, false);
         depthLabel.setText ("Depth", juce::dontSendNotification);
         addAndMakeVisible (depthLabel);
@@ -354,7 +372,8 @@ public:
         inverted.setColour (juce::ToggleButton::textColourId, textPrimary());
         inverted.onClick = [this] { value.inverted = inverted.getToggleState(); notify(); };
         addAndMakeVisible (inverted);
-        setSize (350, 246);
+        setSize (350, 320);
+        updateEnabledState();
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (surfaceColour()); }
@@ -363,9 +382,13 @@ public:
     {
         auto area = getLocalBounds().reduced (14, 11);
         title.setBounds (area.removeFromTop (28));
+        enabled.setBounds (area.removeFromTop (30).withTrimmedLeft (92));
         auto row = area.removeFromTop (39);
         parameterLabel.setBounds (row.removeFromLeft (92));
         parameter.setBounds (row.reduced (0, 4));
+        row = area.removeFromTop (39);
+        curveLabel.setBounds (row.removeFromLeft (92));
+        curve.setBounds (row.reduced (0, 4));
         row = area.removeFromTop (39);
         depthLabel.setBounds (row.removeFromLeft (92));
         depth.setBounds (row);
@@ -381,10 +404,17 @@ public:
 private:
     ModulationConnection value;
     std::function<void(const ModulationConnection&)> onChange;
-    juce::Label title, parameterLabel, depthLabel, offsetLabel, smoothingLabel;
-    juce::ComboBox parameter;
+    juce::Label title, parameterLabel, curveLabel, depthLabel, offsetLabel, smoothingLabel;
+    juce::ComboBox parameter, curve;
     juce::Slider depth, offset, smoothing;
-    juce::ToggleButton inverted;
+    juce::ToggleButton enabled, inverted;
+    void updateEnabledState()
+    {
+        for (auto* component : std::array<juce::Component*, 9> { &parameter, &curve, &depth, &offset, &smoothing,
+                                                                  &inverted, &parameterLabel, &curveLabel, &depthLabel })
+            component->setEnabled (value.enabled);
+        offsetLabel.setEnabled (value.enabled); smoothingLabel.setEnabled (value.enabled);
+    }
     void notify() { if (onChange) onChange (value); }
 };
 

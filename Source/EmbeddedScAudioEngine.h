@@ -14,6 +14,13 @@ namespace gridcollider
 class EmbeddedScAudioEngine
 {
 public:
+    struct VoiceStats
+    {
+        int active = 0;
+        int limit = 64;
+        std::uint64_t stolen = 0;
+    };
+
     static constexpr int channelCount = 16;
 
     EmbeddedScAudioEngine();
@@ -25,6 +32,8 @@ public:
     void renderRaw(juce::AudioBuffer<float>& output);
     void renderOffline(juce::AudioBuffer<float>& output);
     void stopAll();
+    void setMaximumVoices(int maximum) noexcept;
+    [[nodiscard]] VoiceStats getVoiceStats() const noexcept;
 
     void enqueue(const std::vector<InternalEvent>& events);
     void setTransport(double bpm, std::uint64_t tick, bool playing);

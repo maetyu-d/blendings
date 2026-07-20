@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.7.9 LANGUAGES C CXX)
+project(Blendings VERSION 0.7.10 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -241,6 +241,8 @@ endif()
 enable_testing()
 add_test(NAME PlaybackEndToEndSmoke
     COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Demos/Demo1.otherware")
+add_test(NAME PlaybackDemo2EndToEndSmoke
+    COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Demos/Demo2.otherware")
 
 add_executable(SCAudioSmoke EXCLUDE_FROM_ALL
     Source/EmbeddedScAudioEngine.cpp
@@ -371,6 +373,12 @@ target_link_libraries(PipeWorkspaceSmoke PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)
 
+add_test(NAME SCAudioSmoke COMMAND SCAudioSmoke)
+add_test(NAME AudioRobustnessSmoke COMMAND AudioRobustnessSmoke)
+add_test(NAME CarouselSmoke COMMAND CarouselSmoke)
+add_test(NAME ProjectRecoverySmoke COMMAND ProjectRecoverySmoke)
+add_test(NAME PipeWorkspaceSmoke COMMAND PipeWorkspaceSmoke)
+
 find_program(OTHERWARE_NODE node
     HINTS "$ENV{HOME}/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin")
 
@@ -381,4 +389,17 @@ if(OTHERWARE_NODE)
             "${CMAKE_CURRENT_SOURCE_DIR}/Source/PdPatchEditor.html"
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Running Pd editor round-trip checks")
+    add_test(NAME PdEditorRoundTrip
+        COMMAND "${OTHERWARE_NODE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/pd_editor_roundtrip_test.js"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Source/PdPatchEditor.html")
+    set_tests_properties(PdEditorRoundTrip PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
+
+add_custom_target(BlendingsRegressionSuite
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
+    DEPENDS PlaybackEndToEndSmoke SCAudioSmoke AudioRobustnessSmoke
+            CarouselSmoke ProjectRecoverySmoke PipeWorkspaceSmoke
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    COMMENT "Running the complete Blendings regression suite")

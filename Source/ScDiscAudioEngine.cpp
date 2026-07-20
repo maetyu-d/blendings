@@ -542,6 +542,14 @@ void ScDiscAudioEngine::scheduleTriggerManyAtSample (const std::vector<DiscAudio
     if (! events.empty())
     {
         const juce::ScopedLock lock (scheduledEventLock);
+        constexpr size_t maximumPendingEvents = 8192;
+        if (scheduledEvents.size() + events.size() > maximumPendingEvents)
+        {
+            const auto keep = maximumPendingEvents > scheduledEvents.size()
+                                ? maximumPendingEvents - scheduledEvents.size() : 0;
+            droppedEventCount.fetch_add (events.size() - juce::jmin (events.size(), keep));
+            events.resize (juce::jmin (events.size(), keep));
+        }
         scheduledEvents.insert (scheduledEvents.end(),
                                 std::make_move_iterator (events.begin()),
                                 std::make_move_iterator (events.end()));
@@ -865,12 +873,26 @@ void ScDiscAudioEngine::dispatchDueScheduledEvents (std::int64_t now)
 
     if (! dueEvents.empty())
     {
+        constexpr size_t maximumEventsPerDispatch = 256;
+        if (dueEvents.size() > maximumEventsPerDispatch)
+        {
+            droppedEventCount.fetch_add (dueEvents.size() - maximumEventsPerDispatch);
+            dueEvents.resize (maximumEventsPerDispatch);
+        }
         embeddedSc.setTransport (currentBpm.load(), tick.load(), true);
         embeddedSc.enqueue (dueEvents);
     }
 
     for (const auto& trigger : duePdTriggers)
         pdAudio.triggerPatch (trigger.patch, trigger.durationSeconds, trigger.searchPath, trigger.triggerValue);
+}
+
+ScDiscAudioEngine::RuntimeStats ScDiscAudioEngine::getRuntimeStats() const
+{
+    const auto voices = embeddedSc.getVoiceStats();
+    const juce::ScopedLock lock (scheduledEventLock);
+    return { static_cast<int> (scheduledEvents.size() + scheduledPdTriggers.size()),
+             voices.active, voices.limit, voices.stolen, droppedEventCount.load() };
 }
 
 std::int64_t ScDiscAudioEngine::nextScheduledSampleAfter (std::int64_t now) const

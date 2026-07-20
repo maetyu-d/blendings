@@ -4421,6 +4421,8 @@ private:
             child.setProperty ("offset", connection.offset, nullptr);
             child.setProperty ("smoothing", connection.smoothingBeats, nullptr);
             child.setProperty ("inverted", connection.inverted, nullptr);
+            child.setProperty ("enabled", connection.enabled, nullptr);
+            child.setProperty ("curve", static_cast<int> (connection.curve), nullptr);
             tree.addChild (child, -1, nullptr);
         }
         return tree;
@@ -4460,6 +4462,9 @@ private:
                 connection.offset = juce::jlimit (-1.0, 1.0, static_cast<double> (child.getProperty ("offset", 0.0)));
                 connection.smoothingBeats = juce::jlimit (0.0, 8.0, static_cast<double> (child.getProperty ("smoothing", 0.0)));
                 connection.inverted = static_cast<bool> (child.getProperty ("inverted", false));
+                connection.enabled = static_cast<bool> (child.getProperty ("enabled", true));
+                connection.curve = static_cast<ModulationConnection::Curve> (
+                    juce::jlimit (0, 3, static_cast<int> (child.getProperty ("curve", 0))));
                 if (connection.sourceId.isNotEmpty() && connection.targetId.isNotEmpty())
                     connections.push_back (std::move (connection));
             }
@@ -5227,10 +5232,19 @@ private:
         auto signal = 0.0;
         for (const auto& connection : modulationConnections)
         {
-            if (connection.targetKind != kind || connection.targetId != targetId || connection.parameter != parameter) continue;
+            if (! connection.enabled || connection.targetKind != kind || connection.targetId != targetId
+                || connection.parameter != parameter) continue;
             const auto source = std::find_if (modulators.begin(), modulators.end(), [&] (const auto& mod) { return mod.id == connection.sourceId; });
             if (source == modulators.end() || ! source->enabled) continue;
-            auto sourceSignal = source->bipolar ? modulatorValue (*source) * 2.0 - 1.0 : modulatorValue (*source);
+            auto shaped = modulatorValue (*source);
+            switch (connection.curve)
+            {
+                case ModulationConnection::Curve::linear: break;
+                case ModulationConnection::Curve::easeIn: shaped *= shaped; break;
+                case ModulationConnection::Curve::easeOut: shaped = 1.0 - (1.0 - shaped) * (1.0 - shaped); break;
+                case ModulationConnection::Curve::smooth: shaped = shaped * shaped * (3.0 - 2.0 * shaped); break;
+            }
+            auto sourceSignal = source->bipolar ? shaped * 2.0 - 1.0 : shaped;
             if (connection.inverted) sourceSignal = -sourceSignal;
             auto contribution = sourceSignal * connection.depth + connection.offset;
             if (connection.smoothingBeats > 0.0001)
@@ -5254,7 +5268,8 @@ private:
         {
             if (connection.targetKind != kind || connection.targetId != targetId
                 || connection.parameter != parameter
-                || (connection.depth <= 0.000001 && std::abs (connection.offset) <= 0.000001))
+                || ! connection.enabled
+                || (std::abs (connection.depth) <= 0.000001 && std::abs (connection.offset) <= 0.000001))
                 return false;
             const auto source = std::find_if (modulators.begin(), modulators.end(), [&] (const auto& mod)
             { return mod.id == connection.sourceId; });
@@ -5297,11 +5312,11 @@ private:
                     else return item.position;
                 }();
                 const auto connected = std::any_of (modulationConnections.begin(), modulationConnections.end(), [&] (const auto& connection)
-                { return connection.targetKind == kind && connection.targetId == item.id; });
+                { return connection.enabled && connection.targetKind == kind && connection.targetId == item.id; });
                 auto activity = 0.0;
                 if (connected)
                     for (const auto& connection : modulationConnections)
-                        if (connection.targetKind == kind && connection.targetId == item.id)
+                        if (connection.enabled && connection.targetKind == kind && connection.targetId == item.id)
                             if (const auto source = std::find_if (modulators.begin(), modulators.end(), [&] (const auto& mod) { return mod.id == connection.sourceId; });
                                 source != modulators.end() && source->enabled)
                                 activity = juce::jmax (activity, std::abs ((source->bipolar ? modulatorValue (*source) * 2.0 - 1.0
@@ -5332,15 +5347,23 @@ private:
             const auto liveValue = modulatorValue (*source);
             const auto signedDepth = connection.depth * (connection.inverted ? -1.0 : 1.0);
             const auto lineColour = signedDepth < 0.0 ? juce::Colour (0xffff6f91) : purple;
-            g.setColour (lineColour.withAlpha (selected ? 0.95f : static_cast<float> (0.32 + std::abs (connection.depth) * 0.48)));
-            g.drawLine ({ source->position, *target }, selected ? 2.8f : static_cast<float> (1.3 + std::abs (connection.depth)));
+            g.setColour (lineColour.withAlpha (! connection.enabled ? 0.16f
+                                               : selected ? 0.95f : static_cast<float> (0.32 + std::abs (connection.depth) * 0.48)));
+            if (connection.enabled)
+                g.drawLine ({ source->position, *target }, selected ? 2.8f : static_cast<float> (1.3 + std::abs (connection.depth)));
+            else
+            {
+                const float disabledDash[] { 4.0f, 5.0f };
+                g.drawDashedLine ({ source->position, *target }, disabledDash, 2, 1.2f);
+            }
             const auto direction = (*target - source->position);
             const auto length = direction.getDistanceFromOrigin();
             if (length > 8.0f)
             {
                 const auto unit = direction / length;
-                g.setColour (cyan.withAlpha (source->enabled ? 0.92f : 0.25f));
-                g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (source->position + direction * static_cast<float> (liveValue)));
+                g.setColour (cyan.withAlpha (source->enabled && connection.enabled ? 0.92f : 0.25f));
+                if (connection.enabled)
+                    g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (source->position + direction * static_cast<float> (liveValue)));
                 const auto end = *target - unit * 8.0f;
                 const auto normal = juce::Point<float> (-unit.y, unit.x);
                 juce::Path arrow;
@@ -5360,7 +5383,8 @@ private:
                 g.setColour (surfaceColour().withAlpha (0.94f)); g.fillRoundedRectangle (label, 5.0f);
                 g.setColour (lineColour); g.drawRoundedRectangle (label, 5.0f, 1.0f);
                 g.setColour (textPrimary()); g.setFont (juce::FontOptions (9.0f));
-                g.drawText (parameterName + "  " + juce::String (connection.depth * 100.0, 0) + "%",
+                g.drawText (parameterName + "  " + juce::String (connection.depth * 100.0, 0) + "%"
+                                + (connection.enabled ? "" : "  OFF"),
                             label.reduced (5.0f, 0.0f), juce::Justification::centred, true);
             }
         }
@@ -10166,6 +10190,14 @@ public:
     }
     void mouseUp (const juce::MouseEvent&) override { activeStrip = -1; activeControl = Control::none; }
 
+    int preferredContentWidth() const
+    {
+        return juce::jmax (520, static_cast<int> (left * 2.0f
+            + static_cast<float> (canvas.getMixerChannels().size() + 1) * (stripWidth + stripGap)));
+    }
+
+    static constexpr int preferredContentHeight() noexcept { return 500; }
+
 private:
     void timerCallback() override
     {
@@ -10251,6 +10283,74 @@ private:
     int activeStrip = -1; Control activeControl = Control::none;
 };
 
+class MixerViewport final : public juce::Component,
+                            private juce::Timer
+{
+public:
+    explicit MixerViewport (DiscMixerPanel* panelToOwn) : panel (panelToOwn)
+    {
+        viewport.setViewedComponent (panel, true);
+        viewport.setScrollBarsShown (true, true, false, true);
+        viewport.setScrollBarThickness (12);
+        viewport.setWantsKeyboardFocus (true);
+        viewport.addMouseListener (this, true);
+        addAndMakeVisible (viewport);
+        startTimerHz (4);
+    }
+
+    ~MixerViewport() override
+    {
+        viewport.removeMouseListener (this);
+    }
+
+    void resized() override
+    {
+        viewport.setBounds (getLocalBounds());
+        updateContentSize();
+    }
+
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+    {
+        scrollByWheel (wheel);
+    }
+
+#if BLENDINGS_PLAYBACK_SMOKE
+    bool hasHorizontalOverflowForTesting() const
+    {
+        return panel != nullptr && panel->getWidth() > viewport.getViewWidth();
+    }
+    bool scrollsHorizontallyForTesting()
+    {
+        viewport.setViewPosition (120, 0);
+        return viewport.getViewPositionX() > 0;
+    }
+#endif
+
+private:
+    void timerCallback() override { updateContentSize(); }
+
+    void updateContentSize()
+    {
+        if (panel == nullptr) return;
+        const auto visibleWidth = juce::jmax (1, viewport.getWidth() - viewport.getScrollBarThickness());
+        const auto visibleHeight = juce::jmax (1, viewport.getHeight() - viewport.getScrollBarThickness());
+        const auto width = juce::jmax (visibleWidth, panel->preferredContentWidth());
+        const auto height = juce::jmax (visibleHeight, DiscMixerPanel::preferredContentHeight());
+        if (panel->getWidth() != width || panel->getHeight() != height)
+            panel->setSize (width, height);
+    }
+
+    void scrollByWheel (const juce::MouseWheelDetails& wheel)
+    {
+        const auto horizontal = std::abs (wheel.deltaX) > 0.001f ? wheel.deltaX : wheel.deltaY;
+        const auto amount = juce::roundToInt (horizontal * (wheel.isSmooth ? 520.0f : 180.0f));
+        viewport.setViewPosition (viewport.getViewPositionX() - amount, viewport.getViewPositionY());
+    }
+
+    juce::Viewport viewport;
+    DiscMixerPanel* panel = nullptr;
+};
+
 class AudioDiagnosticsPanel final : public juce::Component
 {
 public:
@@ -10294,8 +10394,9 @@ private:
 class PerformanceDiagnosticsPanel final : public juce::Component
 {
 public:
-    void setDiagnostics (RoadCanvas::PerformanceSnapshot value, double audioPercent)
-    { snapshot = value; audioLoad = audioPercent; repaint(); }
+    void setDiagnostics (RoadCanvas::PerformanceSnapshot value, double audioPercent,
+                         ScDiscAudioEngine::RuntimeStats audioRuntime)
+    { snapshot = value; audioLoad = audioPercent; runtime = audioRuntime; repaint(); }
     void paint (juce::Graphics& g) override
     {
         const auto area = getLocalBounds().toFloat();
@@ -10310,7 +10411,10 @@ public:
                     18, 34, getWidth() - 32, 17, juce::Justification::centredLeft);
         g.drawText (juce::String (snapshot.drops) + " drops   " + juce::String (snapshot.devices) + " devices   "
                     + juce::String (snapshot.pipes) + " pipes", 18, 55, getWidth() - 32, 17, juce::Justification::centredLeft);
-        auto contacts = juce::String ((int64) snapshot.contactChecks) + " contact candidates";
+        auto contacts = juce::String (runtime.activeVoices) + "/" + juce::String (runtime.voiceLimit) + " voices   "
+                      + juce::String (runtime.pendingEvents) + " queued   "
+                      + juce::String ((int64) runtime.stolenVoices) + " stolen   "
+                      + juce::String ((int64) runtime.droppedEvents) + " dropped";
         if (snapshot.stressMode)
             contacts << "  /  " << juce::String ((int64) snapshot.stressWorkUnits) << " shadow probes";
         g.drawText (contacts, 18, 76, getWidth() - 32, 17,
@@ -10318,6 +10422,7 @@ public:
     }
 private:
     RoadCanvas::PerformanceSnapshot snapshot;
+    ScDiscAudioEngine::RuntimeStats runtime;
     double audioLoad = 0.0;
 };
 
@@ -10653,6 +10758,173 @@ private:
     juce::Rectangle<int> identityBounds, projectPanelBounds, emptyVisualBounds;
 };
 
+struct ArrangementScene
+{
+    juce::String name;
+    int bars = 4;
+    juce::ValueTree workspace;
+};
+
+static juce::ValueTree createArrangementState (const std::vector<ArrangementScene>& scenes)
+{
+    juce::ValueTree arrangement ("arrangement");
+    for (const auto& scene : scenes)
+    {
+        if (! scene.workspace.isValid())
+            continue;
+        juce::ValueTree item ("scene");
+        item.setProperty ("name", scene.name, nullptr);
+        item.setProperty ("bars", juce::jlimit (1, 256, scene.bars), nullptr);
+        item.addChild (scene.workspace.createCopy(), -1, nullptr);
+        arrangement.addChild (item, -1, nullptr);
+    }
+    return arrangement;
+}
+
+static std::vector<ArrangementScene> readArrangementState (const juce::ValueTree& project)
+{
+    std::vector<ArrangementScene> scenes;
+    const auto arrangement = project.getChildWithName ("arrangement");
+    for (int i = 0; i < arrangement.getNumChildren() && scenes.size() < 64; ++i)
+    {
+        const auto item = arrangement.getChild (i);
+        const auto workspace = item.getChildWithName ("otherwareProject");
+        if (! item.hasType ("scene") || ! workspace.isValid())
+            continue;
+        auto name = item.getProperty ("name").toString().trim();
+        if (name.isEmpty())
+            name = "Scene " + juce::String (scenes.size() + 1);
+        scenes.push_back ({ name, juce::jlimit (1, 256, static_cast<int> (item.getProperty ("bars", 4))),
+                            workspace.createCopy() });
+    }
+    return scenes;
+}
+
+class ArrangementPanel final : public juce::Component,
+                               private juce::ListBoxModel
+{
+public:
+    std::function<std::vector<std::pair<juce::String, int>>()> getScenes;
+    std::function<void(juce::String, int)> addScene;
+    std::function<void(int, juce::String, int, bool)> updateScene;
+    std::function<void(int)> removeScene;
+    std::function<void(int)> launchScene;
+    std::function<void()> playArrangement;
+    std::function<void()> stopArrangement;
+
+    ArrangementPanel()
+    {
+        title.setText ("Arrangement", juce::dontSendNotification);
+        title.setFont (juce::FontOptions (22.0f, juce::Font::bold));
+        title.setColour (juce::Label::textColourId, textPrimary());
+        detail.setText ("Capture workspaces as timed scenes", juce::dontSendNotification);
+        detail.setColour (juce::Label::textColourId, textMuted());
+        name.setText ("Scene 1", false);
+        name.setSelectAllWhenFocused (true);
+        name.setColour (juce::TextEditor::backgroundColourId, raisedSurface());
+        name.setColour (juce::TextEditor::outlineColourId, subtleStroke());
+        name.setColour (juce::TextEditor::textColourId, textPrimary());
+        bars.setRange (1, 256, 1);
+        bars.setValue (4, juce::dontSendNotification);
+        bars.setSliderStyle (juce::Slider::LinearHorizontal);
+        bars.setTextBoxStyle (juce::Slider::TextBoxRight, false, 64, 24);
+        bars.setTextValueSuffix (" bars");
+        list.setModel (this);
+        list.setColour (juce::ListBox::backgroundColourId, appBackground());
+        list.setColour (juce::ListBox::outlineColourId, subtleStroke());
+
+        style (add, "Add Current"); style (update, "Update"); style (launch, "Launch");
+        style (playAll, "Play All"); style (stop, "Stop"); style (remove, "Remove");
+        add.onClick = [this]
+        {
+            if (addScene) addScene (sceneName(), static_cast<int> (bars.getValue()));
+            refresh();
+            list.selectRow (getNumRows() - 1);
+        };
+        update.onClick = [this]
+        {
+            if (const auto row = list.getSelectedRow(); row >= 0 && updateScene)
+                updateScene (row, sceneName(), static_cast<int> (bars.getValue()), true);
+            refresh();
+        };
+        launch.onClick = [this] { if (launchScene && list.getSelectedRow() >= 0) launchScene (list.getSelectedRow()); };
+        playAll.onClick = [this] { if (playArrangement) playArrangement(); };
+        stop.onClick = [this] { if (stopArrangement) stopArrangement(); };
+        remove.onClick = [this]
+        {
+            const auto row = list.getSelectedRow();
+            if (row >= 0 && removeScene) removeScene (row);
+            refresh();
+        };
+        for (auto* component : std::array<juce::Component*, 11> { &title, &detail, &name, &bars, &list, &add,
+                                                                  &update, &launch, &playAll, &stop, &remove })
+            addAndMakeVisible (component);
+    }
+
+    void refresh()
+    {
+        list.updateContent();
+        list.repaint();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (20);
+        title.setBounds (area.removeFromTop (30));
+        detail.setBounds (area.removeFromTop (24));
+        area.removeFromTop (12);
+        auto editor = area.removeFromTop (34);
+        name.setBounds (editor.removeFromLeft (juce::jmax (150, editor.getWidth() - 180)));
+        editor.removeFromLeft (10);
+        bars.setBounds (editor);
+        area.removeFromTop (12);
+        auto actions = area.removeFromBottom (78);
+        auto top = actions.removeFromTop (34);
+        layoutButtons (top, { &add, &update, &launch });
+        actions.removeFromTop (8);
+        layoutButtons (actions.removeFromTop (34), { &playAll, &stop, &remove });
+        list.setBounds (area);
+    }
+
+private:
+    int getNumRows() override { return getScenes ? static_cast<int> (getScenes().size()) : 0; }
+    void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
+    {
+        const auto scenes = getScenes ? getScenes() : std::vector<std::pair<juce::String, int>> {};
+        if (! juce::isPositiveAndBelow (row, static_cast<int> (scenes.size()))) return;
+        if (selected) { g.setColour (accentColour().withAlpha (0.22f)); g.fillRect (0, 0, width, height); }
+        g.setColour (textPrimary()); g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+        g.drawText (scenes[static_cast<size_t> (row)].first, 12, 0, width - 90, height, juce::Justification::centredLeft);
+        g.setColour (textMuted()); g.setFont (juce::FontOptions (12.0f));
+        g.drawText (juce::String (scenes[static_cast<size_t> (row)].second) + " bars", width - 82, 0, 70, height,
+                    juce::Justification::centredRight);
+    }
+    void selectedRowsChanged (int row) override
+    {
+        const auto scenes = getScenes ? getScenes() : std::vector<std::pair<juce::String, int>> {};
+        if (! juce::isPositiveAndBelow (row, static_cast<int> (scenes.size()))) return;
+        name.setText (scenes[static_cast<size_t> (row)].first, false);
+        bars.setValue (scenes[static_cast<size_t> (row)].second, juce::dontSendNotification);
+    }
+    juce::String sceneName() const { auto value = name.getText().trim(); return value.isEmpty() ? "Scene" : value; }
+    static void style (juce::TextButton& button, const juce::String& text)
+    {
+        button.setButtonText (text); button.setColour (juce::TextButton::buttonColourId, raisedSurface());
+        button.setColour (juce::TextButton::textColourOffId, textPrimary());
+    }
+    static void layoutButtons (juce::Rectangle<int> area, std::initializer_list<juce::TextButton*> buttons)
+    {
+        const auto count = static_cast<int> (buttons.size());
+        const auto width = (area.getWidth() - (count - 1) * 8) / count;
+        for (auto* button : buttons) { button->setBounds (area.removeFromLeft (width)); area.removeFromLeft (8); }
+    }
+    juce::Label title, detail;
+    juce::TextEditor name;
+    juce::Slider bars;
+    juce::ListBox list;
+    juce::TextButton add, update, launch, playAll, stop, remove;
+};
+
 class MainComponent final : public juce::AudioAppComponent,
                             private juce::MidiInputCallback,
                             private juce::Timer,
@@ -10730,6 +11002,7 @@ public:
         addAndMakeVisible (gridUnitBox);
         addAndMakeVisible (triggerQuantizeSlider);
         addAndMakeVisible (clockButton);
+        addAndMakeVisible (arrangementButton);
         addAndMakeVisible (projectTitleLabel);
         addAndMakeVisible (statusLabel);
         addAndMakeVisible (masterVolumeLabel);
@@ -11150,6 +11423,9 @@ public:
         clockButton.setTooltip ("Configure auxiliary clocks");
         clockButton.onClick = [this] { openClockSettings(); };
         refreshClockButton();
+        styleEditorButton (arrangementButton, "Arrange");
+        arrangementButton.setTooltip ("Capture and play timed workspace scenes");
+        arrangementButton.onClick = [this] { openArrangement(); };
 
         styleEditorLabel (projectTitleLabel, 12.0f, true);
         projectTitleLabel.setJustificationType (juce::Justification::centredLeft);
@@ -11621,7 +11897,16 @@ public:
         const auto transportX = juce::jmax (16, juce::jmin (preferredTransportX, latestTransportX));
         transportBarBounds = { transportX, toolbar.getY(), transportWidth, toolbar.getHeight() };
         const auto projectWidth = juce::jmax (0, juce::jmin (260, transportX - toolbar.getX() - 12));
-        projectTitleLabel.setBounds (toolbar.getX(), toolbar.getY(), projectWidth, toolbar.getHeight());
+        auto projectArea = juce::Rectangle<int> (toolbar.getX(), toolbar.getY(), projectWidth, toolbar.getHeight());
+        if (projectArea.getWidth() >= 150)
+        {
+            arrangementButton.setVisible (true);
+            arrangementButton.setBounds (projectArea.removeFromRight (78));
+            projectArea.removeFromRight (8);
+        }
+        else
+            arrangementButton.setVisible (false);
+        projectTitleLabel.setBounds (projectArea);
         auto transport = transportBarBounds.reduced (5, 2);
         flowButton.setBounds (transport.removeFromLeft (52));
         transport.removeFromLeft (4);
@@ -12223,6 +12508,7 @@ private:
     juce::ComboBox gridUnitBox;
     juce::Slider triggerQuantizeSlider;
     juce::TextButton clockButton;
+    juce::TextButton arrangementButton;
     juce::Label projectTitleLabel;
     juce::Label statusLabel;
     juce::Label masterVolumeLabel;
@@ -12230,6 +12516,12 @@ private:
     StereoMeter masterMeter;
     AudioDiagnosticsPanel audioDiagnosticsPanel;
     PerformanceDiagnosticsPanel performanceDiagnosticsPanel;
+    std::unique_ptr<FloatingEditorWindow> arrangementWindow;
+    ArrangementPanel* arrangementPanel = nullptr;
+    std::vector<ArrangementScene> arrangementScenes;
+    int activeArrangementScene = -1;
+    bool arrangementPlaying = false;
+    std::int64_t arrangementSceneStartSample = 0;
     juce::Label layersTitleLabel;
     juce::Label layersPathLabel;
     juce::TextButton layersMainButton;
@@ -12622,8 +12914,76 @@ private:
         fireFlowDiscNow (discIndex, scAudio.alignedEventSample (dueSample));
     }
 
+    std::vector<std::pair<juce::String, int>> arrangementSummaries() const
+    {
+        std::vector<std::pair<juce::String, int>> result;
+        result.reserve (arrangementScenes.size());
+        for (const auto& scene : arrangementScenes) result.emplace_back (scene.name, scene.bars);
+        return result;
+    }
+
+    void openArrangement()
+    {
+        if (arrangementWindow != nullptr) { arrangementWindow->toFront (true); return; }
+        auto* panel = new ArrangementPanel();
+        arrangementPanel = panel;
+        panel->getScenes = [this] { return arrangementSummaries(); };
+        panel->addScene = [this] (juce::String name, int bars)
+        {
+            arrangementScenes.push_back ({ std::move (name), bars, canvas.createProjectState() });
+            markProjectDirty();
+        };
+        panel->updateScene = [this] (int index, juce::String name, int bars, bool recapture)
+        {
+            if (! juce::isPositiveAndBelow (index, static_cast<int> (arrangementScenes.size()))) return;
+            auto& scene = arrangementScenes[static_cast<size_t> (index)];
+            scene.name = std::move (name); scene.bars = juce::jlimit (1, 256, bars);
+            if (recapture) scene.workspace = canvas.createProjectState();
+            markProjectDirty();
+        };
+        panel->removeScene = [this] (int index)
+        {
+            if (! juce::isPositiveAndBelow (index, static_cast<int> (arrangementScenes.size()))) return;
+            arrangementScenes.erase (arrangementScenes.begin() + index);
+            if (activeArrangementScene == index) { arrangementPlaying = false; activeArrangementScene = -1; }
+            else if (activeArrangementScene > index) --activeArrangementScene;
+            markProjectDirty();
+        };
+        panel->launchScene = [this] (int index) { startArrangementScene (index, false); };
+        panel->playArrangement = [this]
+        {
+            if (! arrangementScenes.empty()) { arrangementPlaying = true; startArrangementScene (0, true); }
+        };
+        panel->stopArrangement = [this] { arrangementPlaying = false; activeArrangementScene = -1; resetTransport(); };
+        panel->refresh();
+        arrangementWindow = std::make_unique<FloatingEditorWindow> ("Arrangement", panel, this, 560, 520, [this]
+        {
+            arrangementPanel = nullptr;
+            arrangementWindow = nullptr;
+        });
+    }
+
+    void startArrangementScene (int index, bool continueChain)
+    {
+        if (! juce::isPositiveAndBelow (index, static_cast<int> (arrangementScenes.size()))) return;
+        const auto snapshot = arrangementScenes[static_cast<size_t> (index)].workspace.createCopy();
+        juce::StringArray recovery;
+        const juce::ScopedValueSetter<bool> suppress (suppressProjectDirty, true);
+        if (! canvas.applyProjectState (snapshot, &recovery)) return;
+        activeArrangementScene = index;
+        arrangementPlaying = continueChain;
+        canvas.setFlowTiming (globalTempoBpm, beatsForGridChoice (gridUnitChoice));
+        canvas.resetFlowToStart();
+        setTransportRunning (true);
+        arrangementSceneStartSample = currentTransportSamples();
+        dataPaneOpen = false; selectedElement = {};
+        refreshDataPane(); refreshLayersPanel(); updateStatus(); resized(); repaint();
+    }
+
     void resetTransport()
     {
+        arrangementPlaying = false;
+        activeArrangementScene = -1;
         transportRunning = false;
         transportElapsedSamples = 0;
         transportStartedAtSample = scAudio.getRenderedSamplePosition();
@@ -12651,9 +13011,23 @@ private:
                                                   scAudio.getStatusText(), masterLevelLeft.load(), masterLevelRight.load());
         }
         if (performanceDiagnosticsVisible)
-            performanceDiagnosticsPanel.setDiagnostics (canvas.getPerformanceSnapshot(), audioCallbackLoadPercent.load());
+            performanceDiagnosticsPanel.setDiagnostics (canvas.getPerformanceSnapshot(), audioCallbackLoadPercent.load(),
+                                                        scAudio.getRuntimeStats());
         masterLevelLeft.store (masterLevelLeft.load() * 0.82f); masterLevelRight.store (masterLevelRight.load() * 0.82f);
         const auto now = scAudio.getRenderedSamplePosition();
+        if (arrangementPlaying && transportRunning
+            && juce::isPositiveAndBelow (activeArrangementScene, static_cast<int> (arrangementScenes.size())))
+        {
+            const auto samplesPerBar = juce::jmax (1.0, scAudio.getSampleRate() * 60.0 / globalTempoBpm * 4.0);
+            const auto sceneSamples = static_cast<std::int64_t> (std::llround (
+                samplesPerBar * arrangementScenes[static_cast<size_t> (activeArrangementScene)].bars));
+            if (currentTransportSamples() - arrangementSceneStartSample >= sceneSamples)
+            {
+                const auto next = activeArrangementScene + 1;
+                if (next < static_cast<int> (arrangementScenes.size())) startArrangementScene (next, true);
+                else { arrangementPlaying = false; activeArrangementScene = -1; }
+            }
+        }
         if (transportRunning)
             for (auto& chain : pendingElementChains)
             {
@@ -13599,8 +13973,9 @@ private:
             },
             [safeThis] { return safeThis != nullptr && safeThis->isMasterRecording(); },
             [safeThis] { return safeThis != nullptr ? safeThis->masterRecordingDuration() : 0.0; });
-        const auto width = juce::jlimit (520, 1500, 80 + (static_cast<int> (canvas.getMixerChannels().size()) + 1) * 120);
-        mixerWindow = std::make_unique<FloatingEditorWindow> ("Mixer", panel, this, width, 520, [safeThis]
+        auto* scrollableMixer = new MixerViewport (panel);
+        const auto width = juce::jlimit (520, 1500, panel->preferredContentWidth());
+        mixerWindow = std::make_unique<FloatingEditorWindow> ("Mixer", scrollableMixer, this, width, 520, [safeThis]
         { if (safeThis != nullptr) safeThis->mixerWindow = nullptr; });
         mixerWindow->setResizeLimits (520, 420, 1800, 900);
     }
@@ -14321,6 +14696,8 @@ private:
 
         resetTransport();
         applyGlobalTiming (state);
+        arrangementScenes = readArrangementState (state);
+        if (arrangementPanel != nullptr) arrangementPanel->refresh();
         closeElementWindows();
         currentProjectFile = file;
         projectDirty = false;
@@ -14354,6 +14731,7 @@ private:
         project.setProperty ("triggerQuantize", triggerQuantizeChoice, nullptr);
         project.setProperty ("masterGain", masterGain.load(), nullptr);
         project.setProperty ("rainbowUi", rainbowMode, nullptr);
+        project.addChild (createArrangementState (arrangementScenes), -1, nullptr);
         const auto xml = project.createXml();
         if (xml == nullptr) return false;
         const auto serialised = xml->toString();
@@ -14427,6 +14805,8 @@ private:
             project.addChild (juce::ValueTree ("routes"), -1, nullptr); project.addChild (juce::ValueTree ("discs"), -1, nullptr);
             const juce::ScopedValueSetter<bool> suppress (safeThis->suppressProjectDirty, true);
             safeThis->canvas.applyProjectState (project);
+            safeThis->arrangementScenes.clear();
+            if (safeThis->arrangementPanel != nullptr) safeThis->arrangementPanel->refresh();
             safeThis->resetTransport();
             safeThis->applyGlobalTiming (project);
             safeThis->currentProjectFile = juce::File(); safeThis->projectDirty = false; safeThis->dataPaneOpen = false; safeThis->selectedElement = {};
@@ -14456,7 +14836,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.7.9"; }
+    const juce::String getApplicationVersion() override    { return "0.7.10"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String& commandLine) override
@@ -14597,6 +14977,17 @@ int main (int argc, char** argv)
         return 3;
     }
 
+    {
+        auto* mixerPanel = new DiscMixerPanel (canvas, 1.0f, [] (float) {}, [] {}, [] {}, [] {}, [] { return false; }, [] { return 0.0; });
+        MixerViewport mixerViewport (mixerPanel);
+        mixerViewport.setBounds (0, 0, 520, 420);
+        if (! mixerViewport.hasHorizontalOverflowForTesting() || ! mixerViewport.scrollsHorizontallyForTesting())
+        {
+            std::fprintf (stderr, "Playback smoke: mixer viewport did not expose a working horizontal scroll range\n");
+            return 12;
+        }
+    }
+
     const auto selectionBeforePlayback = canvas.getSelectedDiscHandle();
     auto playbackDiscWasAvailable = false;
     if (! canvas.performWithDiscForPlayback (0, [&] { playbackDiscWasAvailable = canvas.getSelectedDiscInfo().valid; })
@@ -14622,6 +15013,28 @@ int main (int argc, char** argv)
         region.setProperty ("id", "quantize-smoke-region", nullptr);
         regions.addChild (region, -1, nullptr);
     }
+    if (auto modulation = savedState.getChildWithName ("modulation"); modulation.isValid())
+    {
+        juce::ValueTree source ("source");
+        source.setProperty ("id", "modulation-smoke-source", nullptr);
+        source.setProperty ("x", 12.0f, nullptr); source.setProperty ("y", 12.0f, nullptr);
+        source.setProperty ("name", "Smoke LFO", nullptr); source.setProperty ("shape", 0, nullptr);
+        source.setProperty ("cycle", 2.0, nullptr); source.setProperty ("phase", 0.25, nullptr);
+        source.setProperty ("clock", 0, nullptr); source.setProperty ("bipolar", true, nullptr);
+        source.setProperty ("enabled", true, nullptr);
+        auto sourceInsertIndex = 0;
+        while (sourceInsertIndex < modulation.getNumChildren()
+               && modulation.getChild (sourceInsertIndex).hasType ("source")) ++sourceInsertIndex;
+        modulation.addChild (source, sourceInsertIndex, nullptr);
+        juce::ValueTree connection ("connection");
+        connection.setProperty ("source", "modulation-smoke-source", nullptr);
+        connection.setProperty ("targetKind", 0, nullptr);
+        connection.setProperty ("target", savedState.getChildWithName ("discs").getChild (0)["id"], nullptr);
+        connection.setProperty ("parameter", 0, nullptr); connection.setProperty ("depth", -0.5, nullptr);
+        connection.setProperty ("offset", 0.1, nullptr); connection.setProperty ("smoothing", 0.25, nullptr);
+        connection.setProperty ("inverted", false, nullptr); connection.setProperty ("enabled", false, nullptr);
+        connection.setProperty ("curve", 3, nullptr); modulation.addChild (connection, -1, nullptr);
+    }
     RoadCanvas roundTripCanvas;
     if (! roundTripCanvas.applyProjectState (savedState.createCopy()))
     {
@@ -14639,6 +15052,20 @@ int main (int argc, char** argv)
     {
         std::fprintf (stderr, "Playback smoke: project state changed during save/load round trip\n");
         return 7;
+    }
+
+    const std::vector<ArrangementScene> arrangementBefore {
+        { "Opening", 4, savedState.createCopy() }, { "Variation", 8, savedState.createCopy() }
+    };
+    auto arrangementProject = savedState.createCopy();
+    arrangementProject.addChild (createArrangementState (arrangementBefore), -1, nullptr);
+    const auto arrangementAfter = readArrangementState (arrangementProject);
+    if (arrangementAfter.size() != 2 || arrangementAfter[0].name != "Opening" || arrangementAfter[0].bars != 4
+        || arrangementAfter[1].name != "Variation" || arrangementAfter[1].bars != 8
+        || ! arrangementAfter[0].workspace.hasType ("otherwareProject"))
+    {
+        std::fprintf (stderr, "Playback smoke: arrangement scenes did not survive project round trip\n");
+        return 11;
     }
 
     auto nestedState = savedState.createCopy();

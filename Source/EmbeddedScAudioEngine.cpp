@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -531,6 +532,17 @@ struct EmbeddedScAudioEngine::Impl
         pendingOutputFrames = 0;
         sendPacket(buildOscMessage("/g_freeAll", { OscArgument::integer(sourceGroupId) }));
         activeNodeByInstrument.clear();
+        activeVoiceNodes.clear();
+    }
+
+    void setMaximumVoices(const int maximum) noexcept
+    {
+        maximumVoices.store(juce::jlimit(8, 512, maximum));
+    }
+
+    EmbeddedScAudioEngine::VoiceStats getVoiceStats() const noexcept
+    {
+        return { estimatedActiveVoices.load(), maximumVoices.load(), stolenVoiceCount.load() };
     }
 
     void enqueue(const std::vector<InternalEvent>& events)
@@ -897,6 +909,7 @@ private:
         const auto& fields = event.fields;
         const auto synth = synthForTarget(fields);
         const auto nodeId = nextNodeId++;
+        registerVoice(nodeId);
         auto duration = secondsForTicks(fields.durationTicks, bpm.load(std::memory_order_relaxed));
         if (const auto iter = fields.parameters.find("sustain"); iter != fields.parameters.end())
             duration = iter->second.getFloatValue();
@@ -948,6 +961,7 @@ private:
         const auto trigger = event.triggerName.toLowerCase();
         const auto synth = synthForName(trigger);
         const auto nodeId = nextNodeId++;
+        registerVoice(nodeId);
         const auto level = levelFor(synth);
         const auto out = event.fields.parameters.count("out") > 0
                              ? juce::jlimit(0, numOutputChannels - 2, event.fields.parameters.at("out").getIntValue())
@@ -1106,6 +1120,19 @@ public:
     }
 
 private:
+    void registerVoice(const std::int32_t nodeId)
+    {
+        const auto limit = maximumVoices.load();
+        while (static_cast<int>(activeVoiceNodes.size()) >= limit)
+        {
+            pendingPackets.push_back(buildOscMessage("/n_free", { OscArgument::integer(activeVoiceNodes.front()) }));
+            activeVoiceNodes.pop_front();
+            stolenVoiceCount.fetch_add(1);
+        }
+        activeVoiceNodes.push_back(nodeId);
+        estimatedActiveVoices.store(static_cast<int>(activeVoiceNodes.size()));
+    }
+
     float levelFor(const juce::String& instrument)
     {
         if (const auto iter = instrumentLevels.find(instrument); iter != instrumentLevels.end())
@@ -1195,6 +1222,8 @@ private:
         numOutputChannels = 0;
         nextNodeId = 10000;
         activeNodeByInstrument.clear();
+        activeVoiceNodes.clear();
+        estimatedActiveVoices.store(0);
         instrumentLevels.clear();
         loadedSynthNames.clear();
         masterLevel = 0.9f;
@@ -1212,6 +1241,7 @@ private:
     std::vector<std::vector<char>> pendingPackets;
     std::vector<std::vector<char>> queuedScratch;
     std::map<juce::String, std::int32_t> activeNodeByInstrument;
+    std::deque<std::int32_t> activeVoiceNodes;
     std::map<juce::String, float> instrumentLevels;
     std::map<juce::String, juce::String> loadedSynthNames;
     mutable juce::CriticalSection channelPaletteLock;
@@ -1223,6 +1253,9 @@ private:
     std::atomic<int> renderFailures { 0 };
     std::atomic<int> queuedEventCount { 0 };
     std::atomic<int> sentEventCount { 0 };
+    std::atomic<int> maximumVoices { 64 };
+    std::atomic<int> estimatedActiveVoices { 0 };
+    std::atomic<std::uint64_t> stolenVoiceCount { 0 };
     std::int32_t nextNodeId = 10000;
     float masterLevel = 0.9f;
     double currentSampleRate = 0.0;
@@ -1251,6 +1284,8 @@ private:
     void renderRaw(juce::AudioBuffer<float>& output) { output.clear(); }
     void renderOffline(juce::AudioBuffer<float>& output) { output.clear(); }
     void stopAll() {}
+    void setMaximumVoices(int) noexcept {}
+    EmbeddedScAudioEngine::VoiceStats getVoiceStats() const noexcept { return {}; }
     void enqueue(const std::vector<InternalEvent>&) {}
     void setTransport(double, std::uint64_t, bool) {}
     void setMasterLevel(float) {}
@@ -1299,6 +1334,16 @@ void EmbeddedScAudioEngine::renderOffline(juce::AudioBuffer<float>& output)
 void EmbeddedScAudioEngine::stopAll()
 {
     impl->stopAll();
+}
+
+void EmbeddedScAudioEngine::setMaximumVoices(const int maximum) noexcept
+{
+    impl->setMaximumVoices(maximum);
+}
+
+EmbeddedScAudioEngine::VoiceStats EmbeddedScAudioEngine::getVoiceStats() const noexcept
+{
+    return impl->getVoiceStats();
 }
 
 void EmbeddedScAudioEngine::enqueue(const std::vector<InternalEvent>& events)

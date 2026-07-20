@@ -41,6 +41,15 @@ struct DiscAudioTrigger
 class ScDiscAudioEngine
 {
 public:
+    struct RuntimeStats
+    {
+        int pendingEvents = 0;
+        int activeVoices = 0;
+        int voiceLimit = 64;
+        std::uint64_t stolenVoices = 0;
+        std::uint64_t droppedEvents = 0;
+    };
+
     void prepare (double sampleRate, int maximumBlockSize, int outputChannels, int inputChannels = 0);
     void release() noexcept;
     void render (juce::AudioBuffer<float>& output, const juce::AudioBuffer<float>* input = nullptr);
@@ -72,6 +81,8 @@ public:
     void resumeScheduledEvents();
     void cancelScheduledEvents();
     void stopPreview();
+    void setMaximumVoices(int maximum) noexcept { embeddedSc.setMaximumVoices (maximum); }
+    [[nodiscard]] RuntimeStats getRuntimeStats() const;
 
     [[nodiscard]] bool isReady() const noexcept;
     [[nodiscard]] juce::String getStatusText() const;
@@ -113,6 +124,7 @@ private:
     std::vector<ScheduledPdTrigger> suspendedPdTriggers;
     std::atomic<std::int64_t> renderedSamples { 0 };
     std::atomic<bool> pdAudioInputMuted { true };
+    std::atomic<std::uint64_t> droppedEventCount { 0 };
 
     gridcollider::InternalEvent makeNoteEvent (const DiscAudioTrigger& trigger, int elementIndex);
     gridcollider::InternalEvent makeScProgramEvent (const DiscAudioTrigger& trigger);
