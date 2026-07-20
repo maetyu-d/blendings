@@ -38,6 +38,7 @@ juce::Colour orcaGridElementColour(){ return rainbowUiEnabled ? juce::Colour (0x
 juce::Colour pdPatchElementColour(){ return rainbowUiEnabled ? juce::Colour (0xffff4b18) : juce::Colour (0xffff744f); }
 juce::Colour carouselElementColour(){ return rainbowUiEnabled ? juce::Colour (0xffff9d00) : juce::Colour (0xffffc857); }
 juce::Colour pipeElementColour() { return rainbowUiEnabled ? juce::Colour (0xff00bf9a) : juce::Colour (0xff42e8c2); }
+juce::Colour orbitsElementColour() { return rainbowUiEnabled ? juce::Colour (0xffff3d91) : juce::Colour (0xffe96ba8); }
 juce::Colour accentColour()      { return rainbowUiEnabled ? juce::Colour (0xff1746ff) : juce::Colour (0xff0a84ff); }
 
 juce::Colour pipeColourForIndex (int index)

@@ -34,6 +34,7 @@ juce::Colour orcaGridElementColour();
 juce::Colour pdPatchElementColour();
 juce::Colour carouselElementColour();
 juce::Colour pipeElementColour();
+juce::Colour orbitsElementColour();
 juce::Colour accentColour();
 
 juce::Colour pipeColourForIndex (int index);

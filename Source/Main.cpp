@@ -930,6 +930,8 @@ public:
         int carouselItemCount = 0;
         int pipeWorldCount = 0;
         bool hasPipeWorld = false;
+        int orbitsCount = 0;
+        bool hasOrbits = false;
         int triggerMode = 0;
         int elementMode = 0;
         double elementProbability = 0.5;
@@ -1373,6 +1375,12 @@ public:
         return static_cast<int> (discs()[static_cast<size_t> (selectedDisc)].carousels.size()) - 1;
     }
 
+    int getLastOrbitsIndex() const
+    {
+        if (selectedDisc < 0 || selectedDisc >= static_cast<int> (discs().size())) return -1;
+        return static_cast<int> (discs()[static_cast<size_t> (selectedDisc)].orbits.size()) - 1;
+    }
+
     bool addNestedWorldToSelectedDisc()
     {
         if (selectedDisc < 0 || selectedDisc >= static_cast<int> (discs().size()))
@@ -1645,6 +1653,39 @@ public:
         if (index < 0) index = static_cast<int> (values.size()) - 1;
         if (! juce::isPositiveAndBelow (index, static_cast<int> (values.size()))) return false;
         values.erase (values.begin() + index); notifyChanged(); repaint(); return true;
+    }
+
+    bool addOrbitsToSelectedDisc()
+    {
+        if (selectedDisc < 0 || selectedDisc >= static_cast<int> (discs().size())) return false;
+        discs()[static_cast<size_t> (selectedDisc)].orbits.push_back (OrbitsDocument::createDefault());
+        notifyChanged(); repaint(); return true;
+    }
+
+    bool removeOrbitsFromSelectedDisc (int index = -1)
+    {
+        if (selectedDisc < 0 || selectedDisc >= static_cast<int> (discs().size())) return false;
+        auto& values = discs()[static_cast<size_t> (selectedDisc)].orbits;
+        if (index < 0) index = static_cast<int> (values.size()) - 1;
+        if (! juce::isPositiveAndBelow (index, static_cast<int> (values.size()))) return false;
+        values.erase (values.begin() + index); notifyChanged(); repaint(); return true;
+    }
+
+    OrbitsDocument getDiscOrbits (const DiscHandle& handle, int index) const
+    {
+        if (const auto* disc = findDisc (handle); disc != nullptr && juce::isPositiveAndBelow (index, static_cast<int> (disc->orbits.size()))) return disc->orbits[static_cast<size_t> (index)];
+        return OrbitsDocument::createDefault();
+    }
+
+    bool setDiscOrbits (const DiscHandle& handle, int index, const OrbitsDocument& document)
+    {
+        if (auto* disc = findDisc (handle); disc != nullptr && juce::isPositiveAndBelow (index, static_cast<int> (disc->orbits.size()))) { disc->orbits[static_cast<size_t> (index)] = document; notifyChanged(); repaint(); return true; }
+        return false;
+    }
+
+    std::vector<OrbitsDocument> getSelectedDiscOrbits() const
+    {
+        return selectedDisc >= 0 && selectedDisc < static_cast<int> (discs().size()) ? discs()[static_cast<size_t> (selectedDisc)].orbits : std::vector<OrbitsDocument> {};
     }
 
     bool removeOrcaGridFromSelectedDisc()
@@ -4513,6 +4554,7 @@ private:
         }
         for (const auto& carousel : disc.carousels) tree.addChild (carousel.toValueTree(), -1, nullptr);
         for (const auto& state : disc.pipeWorlds) { juce::ValueTree child ("pipeWorld"); child.setProperty ("state", state, nullptr); tree.addChild (child, -1, nullptr); }
+        for (const auto& orbits : disc.orbits) tree.addChild (orbits.toValueTree(), -1, nullptr);
         tree.addChild (routesToValueTree (disc.nestedRoutes), -1, nullptr);
         tree.addChild (tapsToValueTree (disc.nestedPipeTaps), -1, nullptr);
         tree.addChild (drainsToValueTree (disc.nestedPipeDrains), -1, nullptr);
@@ -4562,6 +4604,7 @@ private:
             }
             else if (child.hasType ("carousel")) disc.carousels.push_back (CarouselDocument::fromValueTree (child));
             else if (child.hasType ("pipeWorld")) disc.pipeWorlds.push_back (child["state"].toString());
+            else if (child.hasType ("orbits")) disc.orbits.push_back (OrbitsDocument::fromValueTree (child));
             else if (child.hasType ("routes")) { if (! routesFromValueTree (child, disc.nestedRoutes)) return false; }
             else if (child.hasType ("pipeTaps")) { if (! tapsFromValueTree (child, disc.nestedPipeTaps)) return false; }
             else if (child.hasType ("pipeDrains")) { if (! drainsFromValueTree (child, disc.nestedPipeDrains)) return false; }
@@ -4879,6 +4922,7 @@ private:
                  disc.hasCarousel() ? static_cast<int> (disc.carousels.front().items.size()) : 0,
                  static_cast<int> (disc.pipeWorlds.size()),
                  disc.hasPipeWorld(),
+                 static_cast<int> (disc.orbits.size()), disc.hasOrbits(),
                  static_cast<int> (disc.triggerMode),
                  static_cast<int> (disc.elementMode),
                  modulatedUnitValue (disc.elementProbability, ModulationTargetKind::disc, disc.id, 2),
@@ -7539,6 +7583,7 @@ private:
         addOrbitElements (elements, static_cast<int> (disc.orcaGrids.size()), orcaGridElementColour());
         addOrbitElements (elements, static_cast<int> (disc.carousels.size()), carouselElementColour());
         addOrbitElements (elements, static_cast<int> (disc.pipeWorlds.size()), pipeElementColour());
+        addOrbitElements (elements, static_cast<int> (disc.orbits.size()), orbitsElementColour());
 
         if (elements.empty())
             return;
@@ -9928,7 +9973,8 @@ public:
         scSheet,
         orcaGrid,
         carousel,
-        pipeWorld
+        pipeWorld,
+        orbits
     };
 
     ElementDotButton (Kind kindToUse, int indexToUse, juce::Colour colourToUse, juce::String tooltip)
@@ -10957,7 +11003,8 @@ public:
           scSheetDot (ElementDotButton::Kind::scSheet, 0, scSheetElementColour(), "SCsheet"),
           orcaGridDot (ElementDotButton::Kind::orcaGrid, 0, orcaGridElementColour(), "Orca grid"),
           carouselDot (ElementDotButton::Kind::carousel, 0, carouselElementColour(), "Carousel"),
-          pipeWorldDot (ElementDotButton::Kind::pipeWorld, 0, pipeElementColour(), "Pipe")
+          pipeWorldDot (ElementDotButton::Kind::pipeWorld, 0, pipeElementColour(), "Pipe"),
+          orbitsDot (ElementDotButton::Kind::orbits, 0, orbitsElementColour(), "Orbits")
     {
         recordingThread.startThread();
         setOpaque (true);
@@ -11048,6 +11095,7 @@ public:
         dataPaneContent.addAndMakeVisible (orcaGridRowBackground);
         dataPaneContent.addAndMakeVisible (carouselRowBackground);
         dataPaneContent.addAndMakeVisible (pipeWorldRowBackground);
+        dataPaneContent.addAndMakeVisible (orbitsRowBackground);
 
         dataPaneContent.addAndMakeVisible (nestedWorldDot);
         dataPaneContent.addAndMakeVisible (scCodeDot);
@@ -11056,6 +11104,7 @@ public:
         dataPaneContent.addAndMakeVisible (orcaGridDot);
         dataPaneContent.addAndMakeVisible (carouselDot);
         dataPaneContent.addAndMakeVisible (pipeWorldDot);
+        dataPaneContent.addAndMakeVisible (orbitsDot);
         dataPaneContent.addAndMakeVisible (worldLabel);
         dataPaneContent.addAndMakeVisible (worldInfoLabel);
         dataPaneContent.addAndMakeVisible (worldRemoveButton);
@@ -11091,6 +11140,11 @@ public:
         dataPaneContent.addAndMakeVisible (pipeWorldMinusButton);
         dataPaneContent.addAndMakeVisible (pipeWorldPlusButton);
         dataPaneContent.addAndMakeVisible (pipeWorldInfoLabel);
+        dataPaneContent.addAndMakeVisible (orbitsLabel);
+        dataPaneContent.addAndMakeVisible (orbitsOpenButton);
+        dataPaneContent.addAndMakeVisible (orbitsMinusButton);
+        dataPaneContent.addAndMakeVisible (orbitsPlusButton);
+        dataPaneContent.addAndMakeVisible (orbitsInfoLabel);
         addChildComponent (contextualInspectorTitle);
         addChildComponent (contextualInspectorCloseButton);
         addChildComponent (contextualInspectorViewport);
@@ -11323,6 +11377,9 @@ public:
         pipeWorldMinusButton.onClick = [this] { canvas.removePipeWorldFromSelectedDisc(); pipeElementWindow = nullptr; refreshDataPane(); updateStatus(); resized(); };
         pipeWorldPlusButton.onClick = [this] { if (canvas.addPipeWorldToSelectedDisc()) { const auto info=canvas.getSelectedDiscInfo(); selectedElement=ElementSelection{ElementDotButton::Kind::pipeWorld,juce::jmax(0,info.pipeWorldCount-1)}; refreshDataPane(); updateStatus(); resized(); openPipeElementWindow(); } };
         pipeWorldOpenButton.onClick = [this] { openPipeElementWindow(); };
+        orbitsMinusButton.onClick = [this] { canvas.removeOrbitsFromSelectedDisc(); orbitsWindow = nullptr; refreshDataPane(); updateStatus(); resized(); };
+        orbitsPlusButton.onClick = [this] { if (canvas.addOrbitsToSelectedDisc()) { const auto info=canvas.getSelectedDiscInfo(); selectedElement=ElementSelection{ElementDotButton::Kind::orbits,juce::jmax(0,info.orbitsCount-1)}; refreshDataPane(); updateStatus(); resized(); openOrbitsWindow(); } };
+        orbitsOpenButton.onClick = [this] { openOrbitsWindow(); };
 
         worldEnterButton.onClick = [this] { enterNestedWorldForSelectedDisc(); };
         fireDiscButton.onClick = [this] { fireSelectedDisc(); };
@@ -11356,6 +11413,7 @@ public:
         orcaGridDot.onSingleClick = selectElementDot;
         carouselDot.onSingleClick = selectElementDot;
         pipeWorldDot.onSingleClick = selectElementDot;
+        orbitsDot.onSingleClick = selectElementDot;
         nestedWorldDot.onDoubleClick = openElementDot;
         scCodeDot.onDoubleClick = openElementDot;
         pdPatchDot.onDoubleClick = openElementDot;
@@ -11363,6 +11421,7 @@ public:
         orcaGridDot.onDoubleClick = openElementDot;
         carouselDot.onDoubleClick = openElementDot;
         pipeWorldDot.onDoubleClick = openElementDot;
+        orbitsDot.onDoubleClick = openElementDot;
 
         snapToggle.setButtonText ("Snap");
         snapToggle.setToggleState (true, juce::dontSendNotification);
@@ -11579,6 +11638,11 @@ public:
         configurePaneButton (pipeWorldMinusButton, "-");
         configurePaneButton (pipeWorldPlusButton, "+");
         configurePaneLabel (pipeWorldInfoLabel, 12.0f, false);
+        configurePaneLabel (orbitsLabel, 13.0f, true);
+        configurePaneButton (orbitsOpenButton, "Open");
+        configurePaneButton (orbitsMinusButton, "-");
+        configurePaneButton (orbitsPlusButton, "+");
+        configurePaneLabel (orbitsInfoLabel, 12.0f, false);
         configurePaneButton (fireDiscButton, "Fire");
         configurePaneButton (dataPaneCloseButton, "Done");
         fireDiscButton.setColour (juce::TextButton::buttonColourId, accentColour().withAlpha (0.82f));
@@ -11966,7 +12030,7 @@ public:
                 const auto dotColumns = juce::jmax (1, contentWidth / 35);
                 const auto dotRows = elementDots.empty() ? 1
                                                          : juce::jmax (1, (static_cast<int> (elementDots.size()) + dotColumns - 1) / dotColumns);
-                const auto contentHeight = 744 + juce::jmax (0, dotRows - 1) * 29;
+                const auto contentHeight = 804 + juce::jmax (0, dotRows - 1) * 29;
                 dataPaneContent.setSize (contentWidth, juce::jmax (contentHeight, dataPane.getHeight()));
                 auto content = dataPaneContent.getLocalBounds().reduced (2, 0);
 
@@ -12039,11 +12103,12 @@ public:
                 layoutRow (orcaGridRowBackground, orcaGridLabel, orcaGridInfoLabel, &orcaGridOpenButton, orcaGridMinusButton, orcaGridPlusButton);
                 layoutRow (carouselRowBackground, carouselLabel, carouselInfoLabel, &carouselOpenButton, carouselMinusButton, carouselPlusButton);
                 layoutRow (pipeWorldRowBackground, pipeWorldLabel, pipeWorldInfoLabel, &pipeWorldOpenButton, pipeWorldMinusButton, pipeWorldPlusButton);
+                layoutRow (orbitsRowBackground, orbitsLabel, orbitsInfoLabel, &orbitsOpenButton, orbitsMinusButton, orbitsPlusButton);
 
                 const auto info = canvas.getSelectedDiscInfo();
                 const auto canFire = info.soundElementCount > 0 || info.hasNestedWorld || info.hasScCode
                                   || info.hasPdPatch || info.hasScSheet || info.hasOrcaGrid
-                                  || info.hasCarousel || info.hasPipeWorld;
+                                  || info.hasCarousel || info.hasPipeWorld || info.hasOrbits;
                 if (canFire)
                 {
                     fireDiscButton.setBounds (actions.removeFromLeft ((actions.getWidth() - 8) * 2 / 3));
@@ -12553,6 +12618,7 @@ private:
     InspectorRowBackground orcaGridRowBackground { orcaGridElementColour() };
     InspectorRowBackground carouselRowBackground { carouselElementColour() };
     InspectorRowBackground pipeWorldRowBackground { pipeElementColour() };
+    InspectorRowBackground orbitsRowBackground { orbitsElementColour() };
     ElementDotButton nestedWorldDot;
     ElementDotButton scCodeDot;
     ElementDotButton pdPatchDot;
@@ -12560,6 +12626,7 @@ private:
     ElementDotButton orcaGridDot;
     ElementDotButton carouselDot;
     ElementDotButton pipeWorldDot;
+    ElementDotButton orbitsDot;
     juce::Label soundLabel;
     juce::TextButton soundMinusButton;
     juce::TextButton soundPlusButton;
@@ -12598,6 +12665,11 @@ private:
     juce::TextButton pipeWorldMinusButton;
     juce::TextButton pipeWorldPlusButton;
     juce::Label pipeWorldInfoLabel;
+    juce::Label orbitsLabel;
+    juce::TextButton orbitsOpenButton;
+    juce::TextButton orbitsMinusButton;
+    juce::TextButton orbitsPlusButton;
+    juce::Label orbitsInfoLabel;
     juce::TextButton fireDiscButton;
     juce::TextButton dataPaneCloseButton;
     bool dataPaneOpen = false;
@@ -12624,6 +12696,7 @@ private:
     std::unique_ptr<FloatingEditorWindow> carouselWindow;
     std::unique_ptr<FloatingEditorWindow> audioSettingsWindow;
     std::unique_ptr<FloatingEditorWindow> pipeElementWindow;
+    std::unique_ptr<FloatingEditorWindow> orbitsWindow;
     std::unique_ptr<FloatingEditorWindow> mixerWindow;
     juce::Component* pipeElementComponent = nullptr;
     RoadCanvas::DiscHandle pipeElementHandle;
@@ -12631,6 +12704,13 @@ private:
     CarouselEditorPanel* carouselPanel = nullptr;
     std::vector<std::unique_ptr<CarouselEditorComponent>> carouselRuntimes;
     std::vector<std::unique_ptr<juce::Component>> pipeRuntimes;
+    struct OrbitsRuntime
+    {
+        juce::String key;
+        OrbitsDocument document;
+        std::vector<std::int64_t> nextLoopStartSamples;
+    };
+    std::vector<OrbitsRuntime> orbitsRuntimes;
     struct ActiveDisc { juce::String key; std::int64_t untilSample = 0; };
     std::vector<ActiveDisc> activeDiscs;
     struct DiscSequenceState { juce::String key; int nextElement = 0; };
@@ -12641,6 +12721,7 @@ private:
         std::vector<DiscAudioTrigger> triggers;
         std::vector<CarouselDocument> carousels;
         std::vector<juce::String> pipeStates;
+        std::vector<OrbitsDocument> orbits;
         int nextElement = 0;
         std::int64_t nextSample = 0;
     };
@@ -12687,6 +12768,7 @@ private:
         int orcaGrids = 0;
         int carousels = 0;
         int pipeWorlds = 0;
+        int orbits = 0;
 
         bool operator== (const ElementDotSignature& other) const noexcept
         {
@@ -12697,7 +12779,8 @@ private:
                 && scSheets == other.scSheets
                 && orcaGrids == other.orcaGrids
                 && carousels == other.carousels
-                && pipeWorlds == other.pipeWorlds;
+                && pipeWorlds == other.pipeWorlds
+                && orbits == other.orbits;
         }
     };
 
@@ -12866,6 +12949,9 @@ private:
                 if (active.untilSample != std::numeric_limits<std::int64_t>::max()
                     && active.untilSample > transportPausedAtSample)
                     active.untilSample += pausedSamples;
+            for (auto& runtime : orbitsRuntimes)
+                for (auto& nextLoop : runtime.nextLoopStartSamples)
+                    nextLoop += pausedSamples;
             scAudio.resumeScheduledEvents();
             transportPausedAtSample = -1;
         }
@@ -13015,6 +13101,12 @@ private:
                                                         scAudio.getRuntimeStats());
         masterLevelLeft.store (masterLevelLeft.load() * 0.82f); masterLevelRight.store (masterLevelRight.load() * 0.82f);
         const auto now = scAudio.getRenderedSamplePosition();
+        if (transportRunning || transportElapsedSamples == 0)
+        {
+            const auto horizon = now + static_cast<std::int64_t> (std::llround (scAudio.getSampleRate() * 2.0));
+            for (auto& runtime : orbitsRuntimes)
+                scheduleOrbitsUntil (runtime, horizon);
+        }
         if (arrangementPlaying && transportRunning
             && juce::isPositiveAndBelow (activeArrangementScene, static_cast<int> (arrangementScenes.size())))
         {
@@ -13034,7 +13126,7 @@ private:
                 if (chain.nextElement < 0 || chain.nextSample > now) continue;
                 const auto dueSample = chain.nextSample;
                 const auto duration = dispatchChainElement (chain, dueSample);
-                if (! std::isfinite (duration) || chain.nextElement >= static_cast<int> (chain.triggers.size() + chain.carousels.size() + chain.pipeStates.size()))
+                if (! std::isfinite (duration) || chain.nextElement >= static_cast<int> (chain.triggers.size() + chain.carousels.size() + chain.pipeStates.size() + chain.orbits.size()))
                     chain.nextElement = -1;
                 else
                     chain.nextSample = dueSample + static_cast<std::int64_t> (std::llround (duration * scAudio.getSampleRate()));
@@ -13108,7 +13200,62 @@ private:
             if (stateText.isNotEmpty()) otherware::applyPipeWorkspaceState (*runtime, juce::JSON::parse (stateText));
             otherware::setPipeWorkspaceRunning (*runtime, true);
             pipeRuntimes.push_back (std::move (runtime));
+            return std::numeric_limits<double>::infinity();
         }
+        index -= static_cast<int> (chain.pipeStates.size());
+        if (index < static_cast<int> (chain.orbits.size()))
+            return triggerOrbits (chain.key + ":chain:" + juce::String (index), chain.orbits[static_cast<size_t> (index)], dueSample);
+        return 0.0;
+    }
+
+    void scheduleOrbitsUntil (OrbitsRuntime& runtime, std::int64_t horizonSample)
+    {
+        const auto sampleRate = juce::jmax (1.0, scAudio.getSampleRate());
+        if (runtime.nextLoopStartSamples.size() != runtime.document.tracks.size())
+            runtime.nextLoopStartSamples.resize (runtime.document.tracks.size(), scAudio.getRenderedSamplePosition());
+
+        for (int trackIndex = 0; trackIndex < static_cast<int> (runtime.document.tracks.size()); ++trackIndex)
+        {
+            const auto& track = runtime.document.tracks[static_cast<size_t> (trackIndex)];
+            const auto loopSamples = juce::jmax<std::int64_t> (1, static_cast<std::int64_t> (
+                std::llround (runtime.document.loopDurationSeconds (track) * sampleRate)));
+            auto& loopStart = runtime.nextLoopStartSamples[static_cast<size_t> (trackIndex)];
+            while (loopStart < horizonSample)
+            {
+                if (! track.muted)
+                    for (const auto& line : track.lines)
+                    {
+                        if (! line.sound.enabled || line.sound.scCode.trim().isEmpty()) continue;
+                        for (const auto phase : line.triggerPhases)
+                        {
+                            if (juce::Random::getSystemRandom().nextFloat() > line.sound.probability) continue;
+                            DiscAudioTrigger trigger;
+                            trigger.scCode = line.sound.scCode;
+                            trigger.scDurationSeconds = line.sound.durationSeconds;
+                            const auto eventSample = loopStart + static_cast<std::int64_t> (
+                                std::llround (phase * static_cast<double> (loopSamples)));
+                            scAudio.scheduleTriggerManyAtSample ({ trigger }, scAudio.alignedEventSample (eventSample));
+                        }
+                    }
+                loopStart += loopSamples;
+            }
+        }
+    }
+
+    double triggerOrbits (const juce::String& key, const OrbitsDocument& source, std::int64_t dueSample)
+    {
+        orbitsRuntimes.erase (std::remove_if (orbitsRuntimes.begin(), orbitsRuntimes.end(), [&key] (const auto& item)
+        {
+            return item.key == key;
+        }), orbitsRuntimes.end());
+
+        OrbitsRuntime runtime;
+        runtime.key = key;
+        runtime.document = source;
+        runtime.document.refreshTriggerPhases();
+        runtime.nextLoopStartSamples.resize (runtime.document.tracks.size(), dueSample);
+        orbitsRuntimes.push_back (std::move (runtime));
+        scheduleOrbitsUntil (orbitsRuntimes.back(), dueSample + static_cast<std::int64_t> (std::llround (scAudio.getSampleRate() * 2.0)));
         return std::numeric_limits<double>::infinity();
     }
 
@@ -13128,6 +13275,7 @@ private:
     {
         carouselRuntimes.clear();
         pipeRuntimes.clear();
+        orbitsRuntimes.clear();
         activeDiscs.clear();
         pendingElementChains.clear();
         if (preserveTails)
@@ -13308,6 +13456,7 @@ private:
         orcaGridRowBackground.setVisible (shouldBeVisible);
         carouselRowBackground.setVisible (shouldBeVisible);
         pipeWorldRowBackground.setVisible (shouldBeVisible);
+        orbitsRowBackground.setVisible (shouldBeVisible);
         nestedWorldDot.setVisible (false);
         scCodeDot.setVisible (false);
         pdPatchDot.setVisible (false);
@@ -13315,6 +13464,7 @@ private:
         orcaGridDot.setVisible (false);
         carouselDot.setVisible (false);
         pipeWorldDot.setVisible (false);
+        orbitsDot.setVisible (false);
 
         for (auto& dot : elementDots)
             dot->setVisible (shouldBeVisible);
@@ -13354,9 +13504,14 @@ private:
         pipeWorldMinusButton.setVisible (shouldBeVisible && info.hasPipeWorld);
         pipeWorldPlusButton.setVisible (shouldBeVisible);
         pipeWorldInfoLabel.setVisible (shouldBeVisible);
+        orbitsLabel.setVisible (shouldBeVisible);
+        orbitsOpenButton.setVisible (shouldBeVisible && info.hasOrbits);
+        orbitsMinusButton.setVisible (shouldBeVisible && info.hasOrbits);
+        orbitsPlusButton.setVisible (shouldBeVisible);
+        orbitsInfoLabel.setVisible (shouldBeVisible);
         const auto canFire = info.soundElementCount > 0 || info.hasNestedWorld || info.hasScCode
                           || info.hasPdPatch || info.hasScSheet || info.hasOrcaGrid
-                          || info.hasCarousel || info.hasPipeWorld;
+                          || info.hasCarousel || info.hasPipeWorld || info.hasOrbits;
         fireDiscButton.setVisible (shouldBeVisible && canFire);
         dataPaneCloseButton.setVisible (shouldBeVisible);
     }
@@ -13383,6 +13538,8 @@ private:
             carouselInfoLabel.setText ("none", juce::dontSendNotification);
             pipeWorldLabel.setText ("Pipe", juce::dontSendNotification);
             pipeWorldInfoLabel.setText ("none", juce::dontSendNotification);
+            orbitsLabel.setText ("Orbits", juce::dontSendNotification);
+            orbitsInfoLabel.setText ("none", juce::dontSendNotification);
             selectedElement = {};
             triggerModeBox.setSelectedId (1, juce::dontSendNotification);
             holdDropsToggle.setToggleState (false, juce::dontSendNotification);
@@ -13397,6 +13554,7 @@ private:
             orcaGridRowBackground.setActive (false);
             carouselRowBackground.setActive (false);
             pipeWorldRowBackground.setActive (false);
+            orbitsRowBackground.setActive (false);
             refreshElementDots();
             return;
         }
@@ -13407,7 +13565,8 @@ private:
                                  + info.scSheetCount
                                  + info.orcaGridCount
                                  + info.carouselCount
-                                 + info.pipeWorldCount;
+                                 + info.pipeWorldCount
+                                 + info.orbitsCount;
 
         dataPaneTitle.setText ("Disc", juce::dontSendNotification);
         triggerModeBox.setSelectedId (info.triggerMode + 1, juce::dontSendNotification);
@@ -13452,6 +13611,8 @@ private:
         carouselInfoLabel.setText (info.hasCarousel ? juce::String (info.carouselCount) + " fields  /  " + juce::String (info.carouselItemCount) + " objects" : "none", juce::dontSendNotification);
         pipeWorldLabel.setText ("Pipe", juce::dontSendNotification);
         pipeWorldInfoLabel.setText (info.hasPipeWorld ? juce::String (info.pipeWorldCount) + " worlds" : "none", juce::dontSendNotification);
+        orbitsLabel.setText ("Orbits", juce::dontSendNotification);
+        orbitsInfoLabel.setText (info.hasOrbits ? juce::String (info.orbitsCount) + " compositions" : "none", juce::dontSendNotification);
         nestedWorldRowBackground.setActive (info.hasNestedWorld);
         scCodeRowBackground.setActive (info.hasScCode);
         pdPatchRowBackground.setActive (info.hasPdPatch);
@@ -13459,6 +13620,7 @@ private:
         orcaGridRowBackground.setActive (info.hasOrcaGrid);
         carouselRowBackground.setActive (info.hasCarousel);
         pipeWorldRowBackground.setActive (info.hasPipeWorld);
+        orbitsRowBackground.setActive (info.hasOrbits);
 
         worldRemoveButton.setEnabled (info.hasNestedWorld);
         worldAddButton.setEnabled (true);
@@ -13486,9 +13648,13 @@ private:
         pipeWorldMinusButton.setEnabled (info.hasPipeWorld);
         pipeWorldPlusButton.setEnabled (true);
         pipeWorldInfoLabel.setEnabled (info.hasPipeWorld);
+        orbitsOpenButton.setEnabled (info.hasOrbits);
+        orbitsMinusButton.setEnabled (info.hasOrbits);
+        orbitsPlusButton.setEnabled (true);
+        orbitsInfoLabel.setEnabled (info.hasOrbits);
         fireDiscButton.setEnabled (info.soundElementCount > 0 || info.hasNestedWorld || info.hasScCode
                                    || info.hasPdPatch || info.hasScSheet || info.hasOrcaGrid
-                                   || info.hasCarousel || info.hasPipeWorld);
+                                   || info.hasCarousel || info.hasPipeWorld || info.hasOrbits);
         refreshElementDots();
     }
 
@@ -13507,6 +13673,7 @@ private:
             nextSignature.orcaGrids = info.orcaGridCount;
             nextSignature.carousels = info.carouselCount;
             nextSignature.pipeWorlds = info.pipeWorldCount;
+            nextSignature.orbits = info.orbitsCount;
         }
 
         if (! info.valid)
@@ -13521,6 +13688,7 @@ private:
         orcaGridDot.setVisible (false);
         carouselDot.setVisible (false);
         pipeWorldDot.setVisible (false);
+        orbitsDot.setVisible (false);
 
         if (nextSignature == elementDotSignature)
         {
@@ -13540,7 +13708,8 @@ private:
                                                     + nextSignature.pdPatches + nextSignature.scSheets
                                                     + nextSignature.orcaGrids
                                                     + nextSignature.carousels
-                                                    + nextSignature.pipeWorlds));
+                                                    + nextSignature.pipeWorlds
+                                                    + nextSignature.orbits));
             addElementDots (ElementDotButton::Kind::nestedWorld, nextSignature.nestedWorlds, worldElementColour(), "Nested world");
             addElementDots (ElementDotButton::Kind::scCode, nextSignature.scCode, scCodeElementColour(), "SC code");
             addElementDots (ElementDotButton::Kind::pdPatch, nextSignature.pdPatches, pdPatchElementColour(), "Pd patch");
@@ -13548,6 +13717,7 @@ private:
             addElementDots (ElementDotButton::Kind::orcaGrid, nextSignature.orcaGrids, orcaGridElementColour(), "Orca grid");
             addElementDots (ElementDotButton::Kind::carousel, nextSignature.carousels, carouselElementColour(), "Carousel");
             addElementDots (ElementDotButton::Kind::pipeWorld, nextSignature.pipeWorlds, pipeElementColour(), "Pipe");
+            addElementDots (ElementDotButton::Kind::orbits, nextSignature.orbits, orbitsElementColour(), "Orbits");
         }
 
         resized();
@@ -13603,6 +13773,7 @@ private:
             case ElementDotButton::Kind::orcaGrid:    return index < info.orcaGridCount;
             case ElementDotButton::Kind::carousel:    return index < info.carouselCount;
             case ElementDotButton::Kind::pipeWorld:   return index < info.pipeWorldCount;
+            case ElementDotButton::Kind::orbits:      return index < info.orbitsCount;
         }
 
         return false;
@@ -13622,6 +13793,7 @@ private:
             case ElementDotButton::Kind::orcaGrid:    openOrcaGridWindow(); break;
             case ElementDotButton::Kind::carousel:    openCarouselWindow(); break;
             case ElementDotButton::Kind::pipeWorld:   openPipeElementWindow(); break;
+            case ElementDotButton::Kind::orbits:      openOrbitsWindow(); break;
         }
     }
 
@@ -13663,6 +13835,10 @@ private:
                 canvas.removePipeWorldFromSelectedDisc (selectedElement->index);
                 pipeElementWindow = nullptr;
                 pipeElementComponent = nullptr;
+                break;
+            case ElementDotButton::Kind::orbits:
+                canvas.removeOrbitsFromSelectedDisc (selectedElement->index);
+                orbitsWindow = nullptr;
                 break;
         }
 
@@ -13944,6 +14120,57 @@ private:
         carouselWindow = std::make_unique<FloatingEditorWindow> ("Disc Carousel", panel, this, 1040, 700, [safeThis]
         { if (safeThis != nullptr) { safeThis->stopPreviewAudio(); safeThis->carouselPanel = nullptr; safeThis->carouselWindow = nullptr; } });
         carouselWindow->setResizeLimits (1040, 560, 2200, 1600);
+    }
+
+    void openOrbitsWindow()
+    {
+        const auto handle = canvas.getSelectedDiscHandle();
+        const auto info = canvas.getDiscInfo (handle);
+        int index = selectedElement && selectedElement->kind == ElementDotButton::Kind::orbits ? selectedElement->index : 0;
+        if (! info.valid || ! juce::isPositiveAndBelow (index, info.orbitsCount))
+        {
+            statusLabel.setText ("Add Orbits to this disc first", juce::dontSendNotification);
+            return;
+        }
+
+        const auto document = canvas.getDiscOrbits (handle, index);
+        const auto safeThis = juce::Component::SafePointer<MainComponent> (this);
+        auto* editor = new OrbitsEditorComponent (
+            document,
+            [safeThis, handle, index] (const OrbitsDocument& changed)
+            {
+                if (safeThis == nullptr) return;
+                safeThis->canvas.setDiscOrbits (handle, index, changed);
+                safeThis->refreshDataPane();
+                safeThis->updateStatus();
+            },
+            [safeThis] (const juce::String& source, float duration, std::function<void (juce::String, float)> saveLane)
+            {
+                if (safeThis == nullptr) return;
+                safeThis->openPipeWorldScEditor (source, duration,
+                    [commitLane = std::move (saveLane)] (const juce::String& code, float seconds)
+                    {
+                        if (commitLane) commitLane (code, seconds);
+                    }, "Orbits SC Lane");
+            },
+            [safeThis] (const OrbitsLane& lane)
+            {
+                if (safeThis == nullptr) return;
+                DiscAudioTrigger trigger;
+                trigger.scCode = lane.scCode;
+                trigger.scDurationSeconds = lane.durationSeconds;
+                safeThis->scAudio.trigger (trigger);
+            });
+
+        orbitsWindow = std::make_unique<FloatingEditorWindow> ("Disc Orbits", editor, this, 1050, 700,
+            [safeThis]
+            {
+                if (safeThis == nullptr) return;
+                safeThis->stopPreviewAudio();
+                safeThis->orbitsWindow = nullptr;
+            });
+        orbitsWindow->setResizeLimits (820, 560, 2200, 1600);
+        orbitsWindow->toFront (true);
     }
 
     void openMixerWindow()
@@ -14437,7 +14664,8 @@ private:
 
         const auto carouselDocuments = canvas.getSelectedDiscCarousels();
         const auto pipeStates = canvas.getSelectedDiscPipeWorlds();
-        const auto elementCount = static_cast<int> (triggers.size() + carouselDocuments.size() + pipeStates.size());
+        const auto orbitsDocuments = canvas.getSelectedDiscOrbits();
+        const auto elementCount = static_cast<int> (triggers.size() + carouselDocuments.size() + pipeStates.size() + orbitsDocuments.size());
         if (elementCount == 0)
         {
             statusLabel.setText ("Selected disc has no triggerable elements", juce::dontSendNotification);
@@ -14516,6 +14744,15 @@ private:
             pipeRuntimes.push_back (std::move (runtime));
         }
         if (pipeElementComponent != nullptr && ! pipeRuntimes.empty()) otherware::setPipeWorkspaceRunning (*pipeElementComponent, true);
+        auto orbitsDuration = 0.0;
+        auto orbitsIndefinite = false;
+        for (size_t i = 0; i < orbitsDocuments.size(); ++i)
+        {
+            if (! shouldFire[triggers.size() + carouselDocuments.size() + pipeStates.size() + i]) continue;
+            const auto duration = triggerOrbits (discKey + ":orbits:" + juce::String (i), orbitsDocuments[i], dueSample);
+            orbitsIndefinite = orbitsIndefinite || ! std::isfinite (duration);
+            if (std::isfinite (duration)) orbitsDuration = juce::jmax (orbitsDuration, duration);
+        }
 
         if (mode == Disc::ElementMode::chain && elementCount > 1)
         {
@@ -14537,13 +14774,14 @@ private:
                     nextSample += static_cast<std::int64_t> (std::llround (duration * scAudio.getSampleRate()));
             }
 
-            if (chainCanContinue && (! carouselDocuments.empty() || ! pipeStates.empty()))
-                pendingElementChains.push_back ({ discKey, triggers, carouselDocuments, pipeStates,
+            if (chainCanContinue && (! carouselDocuments.empty() || ! pipeStates.empty() || ! orbitsDocuments.empty()))
+                pendingElementChains.push_back ({ discKey, triggers, carouselDocuments, pipeStates, orbitsDocuments,
                                                   static_cast<int> (triggers.size()), nextSample });
         }
 
         auto durationSeconds = 0.45;
-        auto indefinite = ! carouselRuntimes.empty() || ! pipeRuntimes.empty();
+        auto indefinite = ! carouselRuntimes.empty() || ! pipeRuntimes.empty() || orbitsIndefinite;
+        durationSeconds = juce::jmax (durationSeconds, orbitsDuration);
         for (const auto& trigger : selectedTriggers)
         {
             if (trigger.hasScCode())
@@ -14569,6 +14807,8 @@ private:
                 if (! std::isfinite (duration)) { indefinite = true; break; }
                 durationSeconds += duration;
             }
+            if (! orbitsDocuments.empty())
+                indefinite = true;
         }
         activeDiscs.erase (std::remove_if (activeDiscs.begin(), activeDiscs.end(), [&discKey] (const auto& item)
         {
@@ -14836,7 +15076,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.7.10"; }
+    const juce::String getApplicationVersion() override    { return "0.7.11"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String& commandLine) override
@@ -14975,6 +15215,28 @@ int main (int argc, char** argv)
     {
         std::fprintf (stderr, "Playback smoke: demo project could not be loaded\n");
         return 3;
+    }
+
+    auto orbitsBefore = OrbitsDocument::createDefault();
+    OrbitsTriggerLine smokeLine;
+    smokeLine.id = "smoke-line";
+    smokeLine.start = { 0.0f, 0.5f };
+    smokeLine.end = { 1.0f, 0.5f };
+    smokeLine.sound.scCode = "Out.ar(out, SinOsc.ar(440) * 0.05);";
+    orbitsBefore.tracks.front().lines.push_back (smokeLine);
+    orbitsBefore.refreshTriggerPhases();
+    const auto orbitsAfter = OrbitsDocument::fromValueTree (orbitsBefore.toValueTree());
+    if (orbitsAfter.tracks.size() != orbitsBefore.tracks.size()
+        || orbitsAfter.tracks.empty()
+        || orbitsAfter.tracks.front().lines.size() != 1
+        || orbitsAfter.tracks.front().lines.front().sound.scCode.isEmpty()
+        || orbitsAfter.tracks.front().lines.front().triggerPhases.empty()
+        || std::abs (orbitsAfter.tracks.front().bpm - orbitsBefore.tracks.front().bpm) > 0.001
+        || std::abs (orbitsAfter.loopDurationSeconds (orbitsAfter.tracks.front())
+                     - orbitsBefore.loopDurationSeconds (orbitsBefore.tracks.front())) > 0.001)
+    {
+        std::fprintf (stderr, "Playback smoke: Orbits element did not survive persistence round trip\n");
+        return 13;
     }
 
     {

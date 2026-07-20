@@ -159,6 +159,6 @@ int Disc::getElementCount() const noexcept
     return soundElementCount + nestedWorldCount + static_cast<int> (scCodeElements.size())
          + static_cast<int> (pdPatches.size()) + static_cast<int> (scSheets.size())
          + static_cast<int> (orcaGrids.size()) + static_cast<int> (carousels.size())
-         + static_cast<int> (pipeWorlds.size());
+         + static_cast<int> (pipeWorlds.size()) + static_cast<int> (orbits.size());
 }
 }

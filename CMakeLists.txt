@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Blendings VERSION 0.7.10 LANGUAGES C CXX)
+project(Blendings VERSION 0.7.11 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -118,6 +118,8 @@ target_sources(Blendings PRIVATE
     Source/InternalEvent.h
     Source/MusicalObjectEditorComponent.cpp
     Source/MusicalObjectEditorComponent.h
+    Source/OrbitsElement.cpp
+    Source/OrbitsElement.h
     Source/PdAudioEngine.cpp
     Source/PdAudioEngine.h
     Source/PipeWorkspaceComponent.cpp
@@ -198,6 +200,7 @@ juce_add_console_app(PlaybackEndToEndSmoke
 juce_generate_juce_header(PlaybackEndToEndSmoke)
 target_sources(PlaybackEndToEndSmoke PRIVATE
     Source/AppTheme.cpp Source/AppTheme.h
+    Source/OrbitsElement.cpp Source/OrbitsElement.h
     Source/EmbeddedScAudioEngine.cpp Source/EmbeddedScAudioEngine.h
     Source/CarouselEditorComponent.cpp Source/CarouselEditorComponent.h
     Source/GridEditorComponent.cpp Source/GridEditorComponent.h

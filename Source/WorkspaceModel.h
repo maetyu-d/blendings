@@ -5,6 +5,7 @@
 #include "AppTheme.h"
 #include "CarouselEditorComponent.h"
 #include "GridModel.h"
+#include "OrbitsElement.h"
 #include "ScSheetScore.h"
 
 #include <array>
@@ -251,6 +252,7 @@ struct Disc
     std::vector<gridcollider::GridModel::Snapshot> orcaGrids;
     std::vector<CarouselDocument> carousels;
     std::vector<juce::String> pipeWorlds;
+    std::vector<OrbitsDocument> orbits;
     std::vector<RoadRoute> nestedRoutes;
     std::vector<PipeTap> nestedPipeTaps;
     std::vector<PipeDrain> nestedPipeDrains;
@@ -272,5 +274,6 @@ struct Disc
     bool hasPdPatch() const noexcept { return ! pdPatches.empty(); }
     bool hasCarousel() const noexcept { return ! carousels.empty(); }
     bool hasPipeWorld() const noexcept { return ! pipeWorlds.empty(); }
+    bool hasOrbits() const noexcept { return ! orbits.empty(); }
 };
 }
