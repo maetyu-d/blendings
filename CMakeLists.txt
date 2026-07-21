@@ -257,7 +257,7 @@ add_executable(SCAudioSmoke EXCLUDE_FROM_ALL
     Source/InternalEvent.h
     Source/PdAudioEngine.cpp
     Source/PdAudioEngine.h
-    Source/ScAudioSmoke.cpp
+    Tests/ScAudioSmoke.cpp
     Source/ScSheetFormula.cpp
     Source/ScSheetFormula.h
     Source/ScSheetMath.cpp
@@ -266,6 +266,8 @@ add_executable(SCAudioSmoke EXCLUDE_FROM_ALL
     Source/ScSheetScore.h
     Source/ScDiscAudioEngine.cpp
     Source/ScDiscAudioEngine.h)
+
+target_include_directories(SCAudioSmoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 
 target_compile_definitions(SCAudioSmoke PRIVATE
     OTHERWARE_HAS_LIBPD=$<BOOL:${OTHERWARE_HAS_LIBPD}>
@@ -294,7 +296,7 @@ if(OTHERWARE_HAS_LIBPD)
 endif()
 
 add_executable(AudioRobustnessSmoke EXCLUDE_FROM_ALL
-    Source/AudioRobustnessSmoke.cpp
+    Tests/AudioRobustnessSmoke.cpp
     Source/EmbeddedScAudioEngine.cpp
     Source/EmbeddedScAudioEngine.h
     Source/GridInterpreter.cpp
@@ -312,6 +314,7 @@ add_executable(AudioRobustnessSmoke EXCLUDE_FROM_ALL
     Source/ScSheetMath.h
     Source/ScSheetScore.cpp
     Source/ScSheetScore.h)
+target_include_directories(AudioRobustnessSmoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 target_compile_definitions(AudioRobustnessSmoke PRIVATE
     OTHERWARE_HAS_LIBPD=$<BOOL:${OTHERWARE_HAS_LIBPD}>
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
@@ -336,7 +339,8 @@ add_executable(CarouselSmoke EXCLUDE_FROM_ALL
     Source/CarouselEditorComponent.h
     Source/MusicalObjectEditorComponent.cpp
     Source/MusicalObjectEditorComponent.h
-    Source/CarouselSmoke.cpp)
+    Tests/CarouselSmoke.cpp)
+target_include_directories(CarouselSmoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 target_compile_definitions(CarouselSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
 target_link_libraries(CarouselSmoke PRIVATE
     juce::juce_gui_extra
@@ -344,7 +348,8 @@ target_link_libraries(CarouselSmoke PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)
 
-add_executable(ProjectRecoverySmoke EXCLUDE_FROM_ALL Source/ProjectRecoverySmoke.cpp)
+add_executable(ProjectRecoverySmoke EXCLUDE_FROM_ALL Tests/ProjectRecoverySmoke.cpp)
+target_include_directories(ProjectRecoverySmoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 target_compile_definitions(ProjectRecoverySmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
 target_link_libraries(ProjectRecoverySmoke PRIVATE
     juce::juce_gui_basics juce::juce_data_structures
@@ -357,7 +362,8 @@ add_executable(PipeWorkspaceSmoke EXCLUDE_FROM_ALL
     Source/MusicalObjectEditorComponent.h
     Source/PipeWorkspaceComponent.cpp
     Source/PipeWorkspaceComponent.h
-    Source/PipeWorkspaceSmoke.cpp)
+    Tests/PipeWorkspaceSmoke.cpp)
+target_include_directories(PipeWorkspaceSmoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 target_compile_definitions(PipeWorkspaceSmoke PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
@@ -388,13 +394,13 @@ find_program(OTHERWARE_NODE node
 if(OTHERWARE_NODE)
     add_custom_target(PdEditorRoundTrip
         COMMAND "${OTHERWARE_NODE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/pd_editor_roundtrip_test.js"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/pd_editor_roundtrip_test.js"
             "${CMAKE_CURRENT_SOURCE_DIR}/Source/PdPatchEditor.html"
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Running Pd editor round-trip checks")
     add_test(NAME PdEditorRoundTrip
         COMMAND "${OTHERWARE_NODE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/pd_editor_roundtrip_test.js"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/pd_editor_roundtrip_test.js"
             "${CMAKE_CURRENT_SOURCE_DIR}/Source/PdPatchEditor.html")
     set_tests_properties(PdEditorRoundTrip PROPERTIES
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
