@@ -243,9 +243,9 @@ endif()
 
 enable_testing()
 add_test(NAME PlaybackEndToEndSmoke
-    COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Demos/Demo1.otherware")
+    COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Tests/Fixtures/PlaybackDemo1.otherware")
 add_test(NAME PlaybackDemo2EndToEndSmoke
-    COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Demos/Demo2.otherware")
+    COMMAND PlaybackEndToEndSmoke "${CMAKE_CURRENT_SOURCE_DIR}/Tests/Fixtures/PlaybackDemo2.otherware")
 
 add_executable(SCAudioSmoke EXCLUDE_FROM_ALL
     Source/EmbeddedScAudioEngine.cpp
@@ -387,6 +387,13 @@ add_test(NAME AudioRobustnessSmoke COMMAND AudioRobustnessSmoke)
 add_test(NAME CarouselSmoke COMMAND CarouselSmoke)
 add_test(NAME ProjectRecoverySmoke COMMAND ProjectRecoverySmoke)
 add_test(NAME PipeWorkspaceSmoke COMMAND PipeWorkspaceSmoke)
+add_test(NAME RepositoryHygiene
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_repository_hygiene.cmake")
+
+add_custom_target(RepositoryHygiene
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_repository_hygiene.cmake"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Checking repository layout and tracked files")
 
 find_program(OTHERWARE_NODE node
     HINTS "$ENV{HOME}/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin")
