@@ -2,6 +2,7 @@
 #include "AppTheme.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -17,6 +18,23 @@ juce::String starterCode (int pitch)
            "var sig = Saw.ar(" + juce::String (pitch) + ".midicps * [1, 1.004]);\n"
            "sig = RLPF.ar(sig, EnvGen.kr(Env([700, 5200, 900], [0.025, 0.42])), 0.24);\n"
            "Out.ar(out, Balance2.ar(sig[0], sig[1], pan, amp * env * 0.20));";
+}
+
+juce::String starterPdPatch (int pitch)
+{
+    return "#N canvas 20 30 520 320 10;\n"
+           "#X obj 30 30 r trigger;\n"
+           "#X obj 30 62 t b b;\n"
+           "#X msg 30 94 1 \\, 0 380;\n"
+           "#X obj 30 126 line~;\n"
+           "#X obj 150 94 mtof;\n"
+           "#X obj 150 126 osc~;\n"
+           "#X obj 150 158 *~;\n"
+           "#X obj 150 190 dac~;\n"
+           "#X msg 150 62 " + juce::String (pitch) + ";\n"
+           "#X connect 0 0 1 0;\n#X connect 1 0 2 0;\n#X connect 1 1 8 0;\n"
+           "#X connect 2 0 3 0;\n#X connect 3 0 6 1;\n#X connect 8 0 4 0;\n"
+           "#X connect 4 0 5 0;\n#X connect 5 0 6 0;\n#X connect 6 0 7 0;\n#X connect 6 0 7 1;";
 }
 
 juce::Colour trackColour (int index)
@@ -75,11 +93,6 @@ juce::Point<float> spiralPoint (const OrbitsTrack& track, double phase)
              static_cast<float> (0.5 + track.yOffset + y) };
 }
 
-bool crossedPhase (double from, double to, double target)
-{
-    return from <= to ? target >= from && target < to
-                      : target >= from || target < to;
-}
 }
 
 OrbitsDocument OrbitsDocument::createDefault()
@@ -106,7 +119,10 @@ OrbitsDocument OrbitsDocument::createDefault()
 juce::ValueTree OrbitsDocument::toValueTree() const
 {
     juce::ValueTree root ("orbits");
-    root.setProperty ("version", 2, nullptr);
+    root.setProperty ("version", 3, nullptr);
+    root.setProperty ("projectTempo", projectTempoBpm, nullptr);
+    root.setProperty ("snap", snapToMusicalGrid, nullptr);
+    root.setProperty ("snapDivisions", snapDivisionsPerBeat, nullptr);
     for (const auto& track : tracks)
     {
         juce::ValueTree node ("track");
@@ -126,6 +142,9 @@ juce::ValueTree OrbitsDocument::toValueTree() const
         node.setProperty ("yOffset", track.yOffset, nullptr);
         node.setProperty ("hidden", track.hidden, nullptr);
         node.setProperty ("muted", track.muted, nullptr);
+        node.setProperty ("clockMode", static_cast<int> (track.clockMode), nullptr);
+        node.setProperty ("tempoRatio", track.tempoRatio, nullptr);
+        node.setProperty ("resetPhase", track.resetPhaseOnStart, nullptr);
         for (const auto& line : track.lines)
         {
             juce::ValueTree lineNode ("line");
@@ -136,8 +155,13 @@ juce::ValueTree OrbitsDocument::toValueTree() const
             lineNode.setProperty ("y2", line.end.y, nullptr);
             lineNode.setProperty ("name", line.sound.name, nullptr);
             lineNode.setProperty ("code", line.sound.scCode, nullptr);
+            lineNode.setProperty ("pdPatch", line.sound.pdPatch, nullptr);
+            lineNode.setProperty ("playback", static_cast<int> (line.sound.playback), nullptr);
             lineNode.setProperty ("duration", line.sound.durationSeconds, nullptr);
             lineNode.setProperty ("probability", line.sound.probability, nullptr);
+            lineNode.setProperty ("gain", line.sound.gain, nullptr);
+            lineNode.setProperty ("pan", line.sound.pan, nullptr);
+            lineNode.setProperty ("lineColour", line.sound.colourIndex, nullptr);
             lineNode.setProperty ("enabled", line.sound.enabled, nullptr);
             node.addChild (lineNode, -1, nullptr);
         }
@@ -150,6 +174,9 @@ OrbitsDocument OrbitsDocument::fromValueTree (const juce::ValueTree& root)
 {
     if (! root.hasType ("orbits")) return createDefault();
     OrbitsDocument document;
+    document.projectTempoBpm = juce::jlimit (20.0, 400.0, static_cast<double> (root.getProperty ("projectTempo", 120.0)));
+    document.snapToMusicalGrid = static_cast<bool> (root.getProperty ("snap", false));
+    document.snapDivisionsPerBeat = juce::jlimit (1, 16, static_cast<int> (root.getProperty ("snapDivisions", 4)));
     for (const auto& child : root)
     {
         if (! child.hasType ("track")) continue;
@@ -170,6 +197,9 @@ OrbitsDocument OrbitsDocument::fromValueTree (const juce::ValueTree& root)
         track.yOffset = juce::jlimit (-0.5, 0.5, static_cast<double> (child.getProperty ("yOffset", 0.0)));
         track.hidden = static_cast<bool> (child.getProperty ("hidden", false));
         track.muted = static_cast<bool> (child.getProperty ("muted", false));
+        track.clockMode = static_cast<OrbitsTrack::ClockMode> (juce::jlimit (0, 2, static_cast<int> (child.getProperty ("clockMode", 0))));
+        track.tempoRatio = juce::jlimit (0.125, 8.0, static_cast<double> (child.getProperty ("tempoRatio", 1.0)));
+        track.resetPhaseOnStart = static_cast<bool> (child.getProperty ("resetPhase", true));
         for (const auto& lineNode : child)
         {
             if (! lineNode.hasType ("line")) continue;
@@ -181,8 +211,13 @@ OrbitsDocument OrbitsDocument::fromValueTree (const juce::ValueTree& root)
                          static_cast<float> (lineNode.getProperty ("y2", 0.5f)) };
             line.sound.name = lineNode.getProperty ("name", "Sound").toString();
             line.sound.scCode = lineNode.getProperty ("code", starterCode (60)).toString();
+            line.sound.pdPatch = lineNode.getProperty ("pdPatch", starterPdPatch (60)).toString();
+            line.sound.playback = static_cast<OrbitsLane::PlaybackType> (juce::jlimit (0, 1, static_cast<int> (lineNode.getProperty ("playback", 0))));
             line.sound.durationSeconds = static_cast<float> (lineNode.getProperty ("duration", 1.0f));
             line.sound.probability = juce::jlimit (0.0f, 1.0f, static_cast<float> (lineNode.getProperty ("probability", 1.0f)));
+            line.sound.gain = juce::jlimit (0.0f, 1.5f, static_cast<float> (lineNode.getProperty ("gain", 1.0f)));
+            line.sound.pan = juce::jlimit (-1.0f, 1.0f, static_cast<float> (lineNode.getProperty ("pan", 0.0f)));
+            line.sound.colourIndex = juce::jlimit (-1, 7, static_cast<int> (lineNode.getProperty ("lineColour", -1)));
             line.sound.enabled = static_cast<bool> (lineNode.getProperty ("enabled", true));
             track.lines.push_back (std::move (line));
         }
@@ -196,7 +231,14 @@ OrbitsDocument OrbitsDocument::fromValueTree (const juce::ValueTree& root)
 double OrbitsDocument::loopDurationSeconds (const OrbitsTrack& track) const
 {
     const auto beatsPerBar = track.timeSigNumerator * (4.0 / juce::jmax (1, track.timeSigDenominator));
-    return juce::jmax (0.01, beatsPerBar * track.loopBars * 60.0 / juce::jmax (1.0, track.bpm));
+    return juce::jmax (0.01, beatsPerBar * track.loopBars * 60.0 / juce::jmax (1.0, effectiveBpm (track)));
+}
+
+double OrbitsDocument::effectiveBpm (const OrbitsTrack& track) const
+{
+    if (track.clockMode == OrbitsTrack::ClockMode::project) return projectTempoBpm;
+    if (track.clockMode == OrbitsTrack::ClockMode::ratio) return projectTempoBpm * track.tempoRatio;
+    return track.bpm;
 }
 
 std::vector<double> OrbitsDocument::phasesForLine (const OrbitsTrack& track, const OrbitsTriggerLine& line) const
@@ -236,6 +278,20 @@ void OrbitsDocument::refreshTriggerPhases()
             line.triggerPhases = phasesForLine (track, line);
 }
 
+void OrbitsDocument::snapLineToMusicalGrid (const OrbitsTrack& track, OrbitsTriggerLine& line) const
+{
+    if (! snapToMusicalGrid) return;
+    const auto phases = phasesForLine (track, line);
+    if (phases.empty()) return;
+    const auto beatsPerBar = track.timeSigNumerator * (4.0 / juce::jmax (1, track.timeSigDenominator));
+    const auto divisions = juce::jmax (1, juce::roundToInt (beatsPerBar * track.loopBars * snapDivisionsPerBeat));
+    const auto current = phases.front();
+    const auto target = std::round (current * divisions) / divisions;
+    const auto delta = spiralPoint (track, target) - spiralPoint (track, current);
+    line.start += delta;
+    line.end += delta;
+}
+
 class OrbitsEditorComponent::SpiralCanvas final : public juce::Component
 {
 public:
@@ -243,7 +299,11 @@ public:
     int* selectedTrack = nullptr;
     int* selectedLine = nullptr;
     std::vector<double>* playheadPhases = nullptr;
+    std::map<juce::String, std::pair<bool, double>>* triggerFeedback = nullptr;
     std::function<void()> onChanged;
+    std::function<void()> onBeginEdit;
+    std::function<void()> onUndo;
+    std::function<void()> onRedo;
     std::function<void()> onSelectionChanged;
     std::function<void (int)> onLineCreated;
 
@@ -300,8 +360,17 @@ public:
                 const auto& line = track.lines[static_cast<size_t> (lineIndex)];
                 const auto selected = active && selectedLine != nullptr && *selectedLine == lineIndex;
                 const juce::Line<float> screenLine (toScreen (line.start), toScreen (line.end));
-                graphics.setColour ((selected ? juce::Colours::white : colour.brighter (0.28f)).withAlpha (active ? 0.96f : 0.48f));
-                graphics.drawLine (screenLine, selected ? 3.0f : 1.8f);
+                const auto configuredColour = line.sound.colourIndex < 0 ? colour : trackColour (line.sound.colourIndex);
+                auto lineColour = selected ? juce::Colours::white : configuredColour.brighter (0.28f);
+                auto lineWidth = selected ? 3.0f : 1.8f;
+                if (triggerFeedback != nullptr)
+                    if (const auto feedback = triggerFeedback->find (line.id); feedback != triggerFeedback->end())
+                    {
+                        lineColour = feedback->second.first ? juce::Colour (0xff7cffbd) : juce::Colour (0xffff6b74);
+                        lineWidth = 4.6f;
+                    }
+                graphics.setColour (lineColour.withAlpha (active ? 0.96f : 0.48f));
+                graphics.drawLine (screenLine, lineWidth);
                 for (const auto phase : line.triggerPhases)
                 {
                     const auto point = toScreen (spiralPoint (track, phase));
@@ -398,6 +467,11 @@ public:
         if (drawing) { drawEnd = point; repaint(); return; }
         auto& track = document->tracks[static_cast<size_t> (*selectedTrack)];
         if (! juce::isPositiveAndBelow (*selectedLine, static_cast<int> (track.lines.size()))) return;
+        if (dragMode != 0 && ! editCheckpointStarted)
+        {
+            if (onBeginEdit) onBeginEdit();
+            editCheckpointStarted = true;
+        }
         auto& line = track.lines[static_cast<size_t> (*selectedLine)];
         if (dragMode == 1) { const auto delta = point - lastWorld; line.start += delta; line.end += delta; }
         else if (dragMode == 2) line.start = point;
@@ -415,14 +489,17 @@ public:
             drawing = false;
             if (drawStart.getDistanceFrom (drawEnd) > 0.018f)
             {
+                if (onBeginEdit) onBeginEdit();
                 auto& track = document->tracks[static_cast<size_t> (*selectedTrack)];
                 OrbitsTriggerLine line;
                 line.id = juce::Uuid().toString();
                 line.start = drawStart; line.end = drawEnd;
                 line.sound.name = "Sound " + juce::String (track.lines.size() + 1);
                 line.sound.scCode = starterCode (60 + (*selectedTrack * 5 + static_cast<int> (track.lines.size()) * 3) % 24);
+                line.sound.pdPatch = starterPdPatch (60 + (*selectedTrack * 5 + static_cast<int> (track.lines.size()) * 3) % 24);
                 track.lines.push_back (std::move (line));
                 *selectedLine = static_cast<int> (track.lines.size()) - 1;
+                document->snapLineToMusicalGrid (track, track.lines.back());
                 document->refreshTriggerPhases();
                 if (onChanged) onChanged();
                 selectionChanged();
@@ -432,8 +509,12 @@ public:
         }
         if (dragMode != 0)
         {
+            auto& currentTrack = document->tracks[static_cast<size_t> (*selectedTrack)];
+            if (juce::isPositiveAndBelow (*selectedLine, static_cast<int> (currentTrack.lines.size())))
+                document->snapLineToMusicalGrid (currentTrack, currentTrack.lines[static_cast<size_t> (*selectedLine)]);
             dragMode = 0; document->refreshTriggerPhases(); if (onChanged) onChanged(); repaint();
         }
+        editCheckpointStarted = false;
     }
 
     void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override
@@ -447,16 +528,23 @@ public:
 
     bool keyPressed (const juce::KeyPress& key) override
     {
+        if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'Z')
+        {
+            if (key.getModifiers().isShiftDown()) { if (onRedo) onRedo(); }
+            else if (onUndo) onUndo();
+            return true;
+        }
         if (key != juce::KeyPress::backspaceKey && key != juce::KeyPress::deleteKey) return false;
         if (document == nullptr || selectedTrack == nullptr || selectedLine == nullptr) return false;
         auto& lines = document->tracks[static_cast<size_t> (*selectedTrack)].lines;
         if (! juce::isPositiveAndBelow (*selectedLine, static_cast<int> (lines.size()))) return false;
+        if (onBeginEdit) onBeginEdit();
         lines.erase (lines.begin() + *selectedLine); *selectedLine = -1;
         document->refreshTriggerPhases(); if (onChanged) onChanged(); selectionChanged(); repaint(); return true;
     }
 
 private:
-    bool drawing = false, panning = false;
+    bool drawing = false, panning = false, editCheckpointStarted = false;
     int dragMode = 0;
     float viewScale = 1.0f;
     juce::Point<float> viewOffset, lastMouse, lastWorld, drawStart, drawEnd;
@@ -480,9 +568,9 @@ private:
 };
 
 OrbitsEditorComponent::OrbitsEditorComponent (OrbitsDocument initialDocument, Commit commitCallback,
-                                              EditSc editCallback, Audition auditionCallback)
+                                              EditSc editCallback, EditPd editPdCallback, Audition auditionCallback)
     : document (std::move (initialDocument)), commit (std::move (commitCallback)),
-      editSc (std::move (editCallback)), audition (std::move (auditionCallback)),
+      editSc (std::move (editCallback)), editPd (std::move (editPdCallback)), audition (std::move (auditionCallback)),
       canvas (std::make_unique<SpiralCanvas>())
 {
     if (document.tracks.empty()) document = OrbitsDocument::createDefault();
@@ -500,9 +588,12 @@ void OrbitsEditorComponent::configureSlider (juce::Slider& slider, double minimu
     slider.setSliderStyle (juce::Slider::LinearHorizontal);
     slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 68, 24);
     slider.setRange (minimum, maximum, interval);
+    slider.onDragStart = [this] { if (! refreshing) { pushUndoState(); sliderGestureActive = true; } };
+    slider.onDragEnd = [this] { sliderGestureActive = false; };
     slider.onValueChange = [this]
     {
         if (refreshing) return;
+        if (! sliderGestureActive) pushUndoState();
         if (auto* current = track())
         {
             current->bpm = bpmSlider.getValue();
@@ -517,6 +608,14 @@ void OrbitsEditorComponent::configureSlider (juce::Slider& slider, double minimu
             current->yRotationDegrees = yRotationSlider.getValue();
             current->xOffset = xOffsetSlider.getValue();
             current->yOffset = yOffsetSlider.getValue();
+            current->tempoRatio = ratioSlider.getValue();
+            if (auto* selected = line())
+            {
+                selected->sound.durationSeconds = static_cast<float> (durationSlider.getValue());
+                selected->sound.probability = static_cast<float> (probabilitySlider.getValue());
+                selected->sound.gain = static_cast<float> (gainSlider.getValue());
+                selected->sound.pan = static_cast<float> (panSlider.getValue());
+            }
             changed();
         }
     };
@@ -534,18 +633,26 @@ void OrbitsEditorComponent::configure()
     canvas->selectedTrack = &selectedTrack;
     canvas->selectedLine = &selectedLine;
     canvas->playheadPhases = &previewPhases;
+    canvas->triggerFeedback = &triggerFeedback;
     canvas->onChanged = [this] { changed (false); };
+    canvas->onBeginEdit = [this] { pushUndoState(); };
+    canvas->onUndo = [this] { undo(); };
+    canvas->onRedo = [this] { redo(); };
     canvas->onSelectionChanged = [this] { refresh(); };
     canvas->onLineCreated = [this] (int) { refresh(); editSelectedLine(); };
 
-    for (auto* button : { &addTrackButton, &removeTrackButton, &playButton, &stopButton }) addAndMakeVisible (*button);
+    for (auto* button : { &addTrackButton, &removeTrackButton, &playButton, &stopButton, &undoButton, &redoButton }) addAndMakeVisible (*button);
     for (auto* button : { &editSoundButton, &auditionButton, &deleteLineButton }) inspectorContent.addAndMakeVisible (*button);
     inspectorContent.addAndMakeVisible (trackBox);
-    inspectorContent.addAndMakeVisible (hideButton); inspectorContent.addAndMakeVisible (muteButton);
+    for (auto* combo : { &clockModeBox, &snapDivisionBox, &playbackBox, &lineColourBox }) inspectorContent.addAndMakeVisible (*combo);
+    inspectorContent.addAndMakeVisible (lineNameEditor);
+    for (auto* toggle : { &hideButton, &muteButton, &resetPhaseButton, &snapButton, &lineEnabledButton }) inspectorContent.addAndMakeVisible (*toggle);
     for (auto* label : { &trackLabel, &bpmLabel, &meterLabel, &barsLabel, &shapeLabel, &soundLineLabel,
                          &numeratorLabel, &denominatorLabel, &thicknessLabel, &warpLabel,
                          &twistLabel, &phaseLabel, &xRotationLabel, &yRotationLabel,
-                         &xOffsetLabel, &yOffsetLabel }) inspectorContent.addAndMakeVisible (*label);
+                         &xOffsetLabel, &yOffsetLabel, &clockModeLabel, &ratioLabel, &snapLabel,
+                         &lineNameLabel, &playbackLabel, &lineColourLabel, &durationLabel, &probabilityLabel,
+                         &gainLabel, &panLabel }) inspectorContent.addAndMakeVisible (*label);
     trackLabel.setText ("TRACK", juce::dontSendNotification);
     bpmLabel.setText ("TEMPO", juce::dontSendNotification);
     meterLabel.setText ("TIME SIGNATURE", juce::dontSendNotification);
@@ -562,15 +669,26 @@ void OrbitsEditorComponent::configure()
     yRotationLabel.setText ("Y rotation", juce::dontSendNotification);
     xOffsetLabel.setText ("X offset", juce::dontSendNotification);
     yOffsetLabel.setText ("Y offset", juce::dontSendNotification);
+    clockModeLabel.setText ("CLOCK", juce::dontSendNotification);
+    ratioLabel.setText ("Tempo ratio", juce::dontSendNotification);
+    snapLabel.setText ("SNAPPING", juce::dontSendNotification);
+    lineNameLabel.setText ("Name", juce::dontSendNotification);
+    playbackLabel.setText ("Engine", juce::dontSendNotification);
+    lineColourLabel.setText ("Colour", juce::dontSendNotification);
+    durationLabel.setText ("Duration", juce::dontSendNotification);
+    probabilityLabel.setText ("Probability", juce::dontSendNotification);
+    gainLabel.setText ("Gain", juce::dontSendNotification);
+    panLabel.setText ("Pan", juce::dontSendNotification);
 
-    for (auto* label : { &trackLabel, &bpmLabel, &meterLabel, &barsLabel, &shapeLabel, &soundLineLabel })
+    for (auto* label : { &trackLabel, &bpmLabel, &meterLabel, &barsLabel, &shapeLabel, &soundLineLabel, &clockModeLabel, &snapLabel })
     {
         label->setFont (juce::FontOptions (12.0f, juce::Font::bold));
         label->setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.62f));
     }
     for (auto* label : { &numeratorLabel, &denominatorLabel, &thicknessLabel, &warpLabel,
                          &twistLabel, &phaseLabel, &xRotationLabel, &yRotationLabel,
-                         &xOffsetLabel, &yOffsetLabel })
+                         &xOffsetLabel, &yOffsetLabel, &ratioLabel, &lineNameLabel, &playbackLabel, &lineColourLabel,
+                         &durationLabel, &probabilityLabel, &gainLabel, &panLabel })
     {
         label->setFont (juce::FontOptions (11.0f));
         label->setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.48f));
@@ -589,6 +707,16 @@ void OrbitsEditorComponent::configure()
     configureSlider (yRotationSlider, -85.0, 85.0, 1.0);
     configureSlider (xOffsetSlider, -0.5, 0.5, 0.005);
     configureSlider (yOffsetSlider, -0.5, 0.5, 0.005);
+    configureSlider (ratioSlider, 0.125, 8.0, 0.125);
+    configureSlider (durationSlider, -1.0, 30.0, 0.05);
+    configureSlider (probabilitySlider, 0.0, 1.0, 0.01);
+    configureSlider (gainSlider, 0.0, 1.5, 0.01);
+    configureSlider (panSlider, -1.0, 1.0, 0.01);
+
+    clockModeBox.addItemList ({ "Free", "Project tempo", "Tempo ratio" }, 1);
+    snapDivisionBox.addItemList ({ "1 per beat", "2 per beat", "4 per beat", "8 per beat", "16 per beat" }, 1);
+    playbackBox.addItemList ({ "SuperCollider", "Pure Data (Pd)" }, 1);
+    lineColourBox.addItemList ({ "Track colour", "Aqua", "Pink", "Gold", "Violet", "Mint", "Coral", "Blue", "Lime" }, 1);
 
     addTrackButton.onClick = [this] { addTrack(); };
     removeTrackButton.onClick = [this] { removeTrack(); };
@@ -599,20 +727,52 @@ void OrbitsEditorComponent::configure()
     editSoundButton.setTooltip ("Open this line in the SuperCollider editor");
     auditionButton.setTooltip ("Preview this sound line");
     deleteLineButton.setTooltip ("Delete the selected sound line");
+    undoButton.setTooltip ("Undo the last Orbits edit");
+    redoButton.setTooltip ("Redo the last Orbits edit");
     trackBox.onChange = [this]
     {
         if (refreshing) return;
         selectedTrack = juce::jlimit (0, static_cast<int> (document.tracks.size()) - 1, trackBox.getSelectedItemIndex());
         selectedLine = -1; refresh();
     };
-    hideButton.onClick = [this] { if (auto* current = track()) { current->hidden = hideButton.getToggleState(); changed (false); refresh(); } };
-    muteButton.onClick = [this] { if (auto* current = track()) { current->muted = muteButton.getToggleState(); changed (false); refresh(); } };
+    hideButton.onClick = [this] { if (auto* current = track()) { pushUndoState(); current->hidden = hideButton.getToggleState(); changed (false); refresh(); } };
+    muteButton.onClick = [this] { if (auto* current = track()) { pushUndoState(); current->muted = muteButton.getToggleState(); changed (false); refresh(); } };
+    resetPhaseButton.onClick = [this] { if (auto* current = track()) { pushUndoState(); current->resetPhaseOnStart = resetPhaseButton.getToggleState(); changed (false); refresh(); } };
+    clockModeBox.onChange = [this]
+    {
+        if (refreshing) return;
+        if (auto* current = track()) { pushUndoState(); current->clockMode = static_cast<OrbitsTrack::ClockMode> (clockModeBox.getSelectedItemIndex()); changed(); refresh(); }
+    };
+    snapButton.onClick = [this] { pushUndoState(); document.snapToMusicalGrid = snapButton.getToggleState(); changed(); refresh(); };
+    snapDivisionBox.onChange = [this]
+    {
+        if (refreshing) return;
+        static constexpr int divisions[] { 1, 2, 4, 8, 16 };
+        pushUndoState(); document.snapDivisionsPerBeat = divisions[juce::jlimit (0, 4, snapDivisionBox.getSelectedItemIndex())]; changed(); refresh();
+    };
+    playbackBox.onChange = [this]
+    {
+        if (refreshing) return;
+        if (auto* selected = line()) { pushUndoState(); selected->sound.playback = static_cast<OrbitsLane::PlaybackType> (playbackBox.getSelectedItemIndex()); changed (false); refresh(); }
+    };
+    lineColourBox.onChange = [this]
+    {
+        if (refreshing) return;
+        if (auto* selected = line()) { pushUndoState(); selected->sound.colourIndex = lineColourBox.getSelectedItemIndex() - 1; changed (false); refresh(); }
+    };
+    lineEnabledButton.onClick = [this] { if (auto* selected = line()) { pushUndoState(); selected->sound.enabled = lineEnabledButton.getToggleState(); changed (false); refresh(); } };
+    lineNameEditor.onReturnKey = [this]
+    {
+        if (auto* selected = line(); selected != nullptr && selected->sound.name != lineNameEditor.getText()) { pushUndoState(); selected->sound.name = lineNameEditor.getText(); changed (false); refresh(); }
+    };
+    lineNameEditor.onFocusLost = lineNameEditor.onReturnKey;
     editSoundButton.onClick = [this] { editSelectedLine(); };
     auditionButton.onClick = [this] { if (auto* selected = line(); selected != nullptr && audition) audition (selected->sound); };
     deleteLineButton.onClick = [this]
     {
         if (auto* current = track(); current != nullptr && juce::isPositiveAndBelow (selectedLine, static_cast<int> (current->lines.size())))
         {
+            pushUndoState();
             current->lines.erase (current->lines.begin() + selectedLine); selectedLine = -1; changed(); refresh();
         }
     };
@@ -627,6 +787,8 @@ void OrbitsEditorComponent::configure()
         previewRunning = false; previewSeconds = 0.0; std::fill (previewPhases.begin(), previewPhases.end(), 0.0);
         playButton.setButtonText ("Play"); canvas->repaint();
     };
+    undoButton.onClick = [this] { undo(); };
+    redoButton.onClick = [this] { redo(); };
 }
 
 OrbitsTrack* OrbitsEditorComponent::track()
@@ -644,6 +806,7 @@ OrbitsTriggerLine* OrbitsEditorComponent::line()
 
 void OrbitsEditorComponent::addTrack()
 {
+    pushUndoState();
     OrbitsTrack newTrack;
     newTrack.name = "Track " + juce::String (document.tracks.size() + 1);
     newTrack.colourIndex = static_cast<int> (document.tracks.size());
@@ -658,6 +821,7 @@ void OrbitsEditorComponent::addTrack()
 void OrbitsEditorComponent::removeTrack()
 {
     if (document.tracks.size() <= 1) return;
+    pushUndoState();
     document.tracks.erase (document.tracks.begin() + selectedTrack);
     selectedTrack = juce::jlimit (0, static_cast<int> (document.tracks.size()) - 1, selectedTrack);
     selectedLine = -1; changed(); refresh();
@@ -666,18 +830,69 @@ void OrbitsEditorComponent::removeTrack()
 void OrbitsEditorComponent::editSelectedLine()
 {
     auto* selected = line();
-    if (selected == nullptr || ! editSc) return;
-    const auto trackIndex = selectedTrack, lineIndex = selectedLine;
-    editSc (selected->sound.scCode, selected->sound.durationSeconds,
-        [this, trackIndex, lineIndex] (juce::String code, float duration)
-        {
-            if (! juce::isPositiveAndBelow (trackIndex, static_cast<int> (document.tracks.size()))) return;
-            auto& lines = document.tracks[static_cast<size_t> (trackIndex)].lines;
-            if (! juce::isPositiveAndBelow (lineIndex, static_cast<int> (lines.size()))) return;
-            lines[static_cast<size_t> (lineIndex)].sound.scCode = std::move (code);
-            lines[static_cast<size_t> (lineIndex)].sound.durationSeconds = duration;
-            changed (false); refresh();
-        });
+    if (selected == nullptr) return;
+    const auto lineId = selected->id;
+    const auto playback = selected->sound.playback;
+    const auto safeThis = juce::Component::SafePointer<OrbitsEditorComponent> (this);
+    auto save = [safeThis, lineId, playback] (juce::String code, float duration)
+    {
+        if (safeThis == nullptr) return;
+        for (auto& track : safeThis->document.tracks)
+            for (auto& candidate : track.lines)
+                if (candidate.id == lineId)
+                {
+                    safeThis->pushUndoState();
+                    if (playback == OrbitsLane::PlaybackType::pureData) candidate.sound.pdPatch = std::move (code);
+                    else candidate.sound.scCode = std::move (code);
+                    candidate.sound.durationSeconds = duration;
+                    safeThis->changed (false); safeThis->refresh();
+                    return;
+                }
+    };
+    if (selected->sound.playback == OrbitsLane::PlaybackType::pureData)
+    {
+        if (editPd) editPd (selected->sound.pdPatch, selected->sound.durationSeconds, std::move (save));
+    }
+    else if (editSc)
+    {
+        editSc (selected->sound.scCode, selected->sound.durationSeconds, std::move (save));
+    }
+}
+
+void OrbitsEditorComponent::pushUndoState()
+{
+    if (restoringHistory) return;
+    if (undoHistory.empty() || ! undoHistory.back().toValueTree().isEquivalentTo (document.toValueTree()))
+        undoHistory.push_back (document);
+    if (undoHistory.size() > 100) undoHistory.erase (undoHistory.begin());
+    redoHistory.clear();
+    undoButton.setEnabled (! undoHistory.empty());
+    redoButton.setEnabled (false);
+}
+
+void OrbitsEditorComponent::restoreHistory (const OrbitsDocument& state)
+{
+    const juce::ScopedValueSetter<bool> guard (restoringHistory, true);
+    document = state;
+    document.refreshTriggerPhases();
+    selectedTrack = juce::jlimit (0, static_cast<int> (document.tracks.size()) - 1, selectedTrack);
+    selectedLine = -1;
+    changed (false);
+    refresh();
+}
+
+void OrbitsEditorComponent::undo()
+{
+    if (undoHistory.empty()) return;
+    redoHistory.push_back (document);
+    const auto state = undoHistory.back(); undoHistory.pop_back(); restoreHistory (state);
+}
+
+void OrbitsEditorComponent::redo()
+{
+    if (redoHistory.empty()) return;
+    undoHistory.push_back (document);
+    const auto state = redoHistory.back(); redoHistory.pop_back(); restoreHistory (state);
 }
 
 void OrbitsEditorComponent::changed (bool recomputeIntersections)
@@ -711,22 +926,54 @@ void OrbitsEditorComponent::refresh()
         yRotationSlider.setValue (current->yRotationDegrees, juce::dontSendNotification);
         xOffsetSlider.setValue (current->xOffset, juce::dontSendNotification);
         yOffsetSlider.setValue (current->yOffset, juce::dontSendNotification);
+        ratioSlider.setValue (current->tempoRatio, juce::dontSendNotification);
+        clockModeBox.setSelectedItemIndex (static_cast<int> (current->clockMode), juce::dontSendNotification);
+        resetPhaseButton.setToggleState (current->resetPhaseOnStart, juce::dontSendNotification);
+        bpmSlider.setEnabled (current->clockMode == OrbitsTrack::ClockMode::free);
+        ratioSlider.setEnabled (current->clockMode == OrbitsTrack::ClockMode::ratio);
         hideButton.setToggleState (current->hidden, juce::dontSendNotification);
         muteButton.setToggleState (current->muted, juce::dontSendNotification);
     }
     const auto hasLine = line() != nullptr;
+    snapButton.setToggleState (document.snapToMusicalGrid, juce::dontSendNotification);
+    const auto snapIndex = document.snapDivisionsPerBeat <= 1 ? 0 : document.snapDivisionsPerBeat <= 2 ? 1
+                         : document.snapDivisionsPerBeat <= 4 ? 2 : document.snapDivisionsPerBeat <= 8 ? 3 : 4;
+    snapDivisionBox.setSelectedItemIndex (snapIndex, juce::dontSendNotification);
     soundLineLabel.setText (hasLine ? "SOUND LINE  /  " + line()->sound.name.toUpperCase()
                                     : "SOUND LINE  /  NONE SELECTED",
                                 juce::dontSendNotification);
-    editSoundButton.setEnabled (hasLine); auditionButton.setEnabled (hasLine); deleteLineButton.setEnabled (hasLine);
+    if (auto* selected = line())
+    {
+        lineNameEditor.setText (selected->sound.name, false);
+        playbackBox.setSelectedItemIndex (static_cast<int> (selected->sound.playback), juce::dontSendNotification);
+        lineColourBox.setSelectedItemIndex (selected->sound.colourIndex + 1, juce::dontSendNotification);
+        lineEnabledButton.setToggleState (selected->sound.enabled, juce::dontSendNotification);
+        durationSlider.setValue (selected->sound.durationSeconds, juce::dontSendNotification);
+        probabilitySlider.setValue (selected->sound.probability, juce::dontSendNotification);
+        gainSlider.setValue (selected->sound.gain, juce::dontSendNotification);
+        panSlider.setValue (selected->sound.pan, juce::dontSendNotification);
+        editSoundButton.setButtonText (selected->sound.playback == OrbitsLane::PlaybackType::pureData ? "Edit Pd" : "Edit SC");
+        editSoundButton.setTooltip (selected->sound.playback == OrbitsLane::PlaybackType::pureData
+                                    ? "Open this line in the Pure Data editor"
+                                    : "Open this line in the SuperCollider editor");
+    }
+    const std::array<juce::Component*, 11> lineControls { &lineNameEditor, &playbackBox, &lineColourBox, &lineEnabledButton,
+                                                          &durationSlider, &probabilitySlider, &gainSlider, &panSlider,
+                                                          &editSoundButton, &auditionButton, &deleteLineButton };
+    for (auto* component : lineControls)
+        component->setEnabled (hasLine);
     removeTrackButton.setEnabled (document.tracks.size() > 1);
+    undoButton.setEnabled (! undoHistory.empty());
+    redoButton.setEnabled (! redoHistory.empty());
     canvas->repaint();
 }
 
 void OrbitsEditorComponent::timerCallback()
 {
-    if (! previewRunning) return;
     const auto now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    for (auto it = triggerFeedback.begin(); it != triggerFeedback.end();)
+        if (it->second.second <= now) it = triggerFeedback.erase (it); else ++it;
+    if (! previewRunning) { canvas->repaint(); return; }
     const auto delta = juce::jlimit (0.0, 0.1, now - lastPreviewTime);
     lastPreviewTime = now;
     const auto previousTime = previewSeconds;
@@ -736,15 +983,23 @@ void OrbitsEditorComponent::timerCallback()
     {
         const auto& current = document.tracks[static_cast<size_t> (trackIndex)];
         const auto loopSeconds = document.loopDurationSeconds (current);
-        const auto previousPhase = std::fmod (previousTime / loopSeconds, 1.0);
-        const auto nextPhase = std::fmod (previewSeconds / loopSeconds, 1.0);
+        const auto previousPosition = previousTime / loopSeconds;
+        const auto nextPosition = previewSeconds / loopSeconds;
+        const auto nextPhase = std::fmod (nextPosition, 1.0);
         previewPhases[static_cast<size_t> (trackIndex)] = nextPhase;
         if (current.muted) continue;
         for (const auto& triggerLine : current.lines)
             for (const auto phase : triggerLine.triggerPhases)
-                if (crossedPhase (previousPhase, nextPhase, phase) && triggerLine.sound.enabled
-                    && juce::Random::getSystemRandom().nextFloat() <= triggerLine.sound.probability && audition)
-                    audition (triggerLine.sound);
+            {
+                const auto crossings = juce::jlimit (0, 64, static_cast<int> (
+                    std::floor (nextPosition - phase) - std::floor (previousPosition - phase)));
+                for (int crossing = 0; crossing < crossings && triggerLine.sound.enabled; ++crossing)
+                {
+                    const auto passed = juce::Random::getSystemRandom().nextFloat() <= triggerLine.sound.probability;
+                    triggerFeedback[triggerLine.id] = { passed, now + (passed ? 0.24 : 0.16) };
+                    if (passed && audition) audition (triggerLine.sound);
+                }
+            }
     }
     canvas->repaint();
 }
@@ -771,7 +1026,9 @@ void OrbitsEditorComponent::paint (juce::Graphics& graphics)
 void OrbitsEditorComponent::resized()
 {
     auto header = getLocalBounds().removeFromTop (72).reduced (18, 12);
-    auto transport = header.removeFromRight (302);
+    auto transport = header.removeFromRight (430);
+    undoButton.setBounds (transport.removeFromLeft (58)); transport.removeFromLeft (4);
+    redoButton.setBounds (transport.removeFromLeft (58)); transport.removeFromLeft (12);
     addTrackButton.setBounds (transport.removeFromLeft (82)); transport.removeFromLeft (6);
     removeTrackButton.setBounds (transport.removeFromLeft (34)); transport.removeFromLeft (14);
     playButton.setBounds (transport.removeFromLeft (72)); transport.removeFromLeft (6);
@@ -784,7 +1041,7 @@ void OrbitsEditorComponent::resized()
     canvas->setBounds (body.reduced (12, 10));
 
     const auto contentWidth = juce::jmax (280, inspectorViewport.getWidth() - inspectorViewport.getScrollBarThickness() - 4);
-    inspectorContent.setSize (contentWidth, juce::jmax (inspectorViewport.getHeight(), 548));
+    inspectorContent.setSize (contentWidth, juce::jmax (inspectorViewport.getHeight(), 900));
     auto inspector = inspectorContent.getLocalBounds().reduced (4, 2);
 
     trackLabel.setBounds (inspector.removeFromTop (18));
@@ -793,7 +1050,14 @@ void OrbitsEditorComponent::resized()
     auto trackActions = inspector.removeFromTop (28);
     hideButton.setBounds (trackActions.removeFromLeft (140));
     muteButton.setBounds (trackActions);
-    inspector.removeFromTop (12);
+    inspector.removeFromTop (10);
+
+    clockModeLabel.setBounds (inspector.removeFromTop (18));
+    clockModeBox.setBounds (inspector.removeFromTop (30));
+    auto clockOptions = inspector.removeFromTop (34);
+    ratioLabel.setBounds (clockOptions.removeFromLeft (90)); ratioSlider.setBounds (clockOptions);
+    resetPhaseButton.setBounds (inspector.removeFromTop (28));
+    inspector.removeFromTop (8);
 
     auto parameterRow = [&inspector] (juce::Label& label, juce::Component& control)
     {
@@ -825,7 +1089,23 @@ void OrbitsEditorComponent::resized()
     parameterPair (xRotationLabel, xRotationSlider, yRotationLabel, yRotationSlider);
     parameterPair (xOffsetLabel, xOffsetSlider, yOffsetLabel, yOffsetSlider);
     inspector.removeFromTop (8);
+    snapLabel.setBounds (inspector.removeFromTop (18));
+    auto snapRow = inspector.removeFromTop (32);
+    snapButton.setBounds (snapRow.removeFromLeft (142)); snapDivisionBox.setBounds (snapRow);
+    inspector.removeFromTop (10);
     soundLineLabel.setBounds (inspector.removeFromTop (20));
+    auto lineNameRow = inspector.removeFromTop (32);
+    lineNameLabel.setBounds (lineNameRow.removeFromLeft (72)); lineNameEditor.setBounds (lineNameRow);
+    auto playbackRow = inspector.removeFromTop (32);
+    playbackLabel.setBounds (playbackRow.removeFromLeft (72)); playbackBox.setBounds (playbackRow);
+    auto colourRow = inspector.removeFromTop (32);
+    lineColourLabel.setBounds (colourRow.removeFromLeft (72)); lineColourBox.setBounds (colourRow);
+    lineEnabledButton.setBounds (inspector.removeFromTop (27));
+    parameterRow (durationLabel, durationSlider);
+    parameterRow (probabilityLabel, probabilitySlider);
+    parameterRow (gainLabel, gainSlider);
+    parameterRow (panLabel, panSlider);
+    inspector.removeFromTop (6);
     auto lineActions = inspector.removeFromTop (36);
     editSoundButton.setBounds (lineActions.removeFromLeft (92)); lineActions.removeFromLeft (6);
     auditionButton.setBounds (lineActions.removeFromLeft (86)); lineActions.removeFromLeft (6);

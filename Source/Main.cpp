@@ -13225,16 +13225,30 @@ private:
                 if (! track.muted)
                     for (const auto& line : track.lines)
                     {
-                        if (! line.sound.enabled || line.sound.scCode.trim().isEmpty()) continue;
+                        const auto sourceIsEmpty = line.sound.playback == OrbitsLane::PlaybackType::pureData
+                                                   ? line.sound.pdPatch.trim().isEmpty()
+                                                   : line.sound.scCode.trim().isEmpty();
+                        if (! line.sound.enabled || sourceIsEmpty) continue;
                         for (const auto phase : line.triggerPhases)
                         {
                             if (juce::Random::getSystemRandom().nextFloat() > line.sound.probability) continue;
                             DiscAudioTrigger trigger;
-                            trigger.scCode = line.sound.scCode;
-                            trigger.scDurationSeconds = line.sound.durationSeconds;
+                            if (line.sound.playback == OrbitsLane::PlaybackType::pureData)
+                            {
+                                trigger.pdPatch = line.sound.pdPatch;
+                                trigger.pdDurationSeconds = line.sound.durationSeconds;
+                            }
+                            else
+                            {
+                                trigger.scCode = line.sound.scCode;
+                                trigger.scDurationSeconds = line.sound.durationSeconds;
+                            }
+                            trigger.gain = line.sound.gain;
+                            trigger.pan = line.sound.pan;
                             const auto eventSample = loopStart + static_cast<std::int64_t> (
                                 std::llround (phase * static_cast<double> (loopSamples)));
-                            scAudio.scheduleTriggerManyAtSample ({ trigger }, scAudio.alignedEventSample (eventSample));
+                            if (eventSample >= scAudio.getRenderedSamplePosition())
+                                scAudio.scheduleTriggerManyAtSample ({ trigger }, scAudio.alignedEventSample (eventSample));
                         }
                     }
                 loopStart += loopSamples;
@@ -13252,8 +13266,18 @@ private:
         OrbitsRuntime runtime;
         runtime.key = key;
         runtime.document = source;
+        runtime.document.projectTempoBpm = globalTempoBpm;
         runtime.document.refreshTriggerPhases();
         runtime.nextLoopStartSamples.resize (runtime.document.tracks.size(), dueSample);
+        const auto sampleRate = juce::jmax (1.0, scAudio.getSampleRate());
+        for (size_t i = 0; i < runtime.document.tracks.size(); ++i)
+        {
+            const auto& track = runtime.document.tracks[i];
+            if (track.resetPhaseOnStart) continue;
+            const auto loopSamples = juce::jmax<std::int64_t> (1, static_cast<std::int64_t> (
+                std::llround (runtime.document.loopDurationSeconds (track) * sampleRate)));
+            runtime.nextLoopStartSamples[i] = dueSample - (dueSample % loopSamples);
+        }
         orbitsRuntimes.push_back (std::move (runtime));
         scheduleOrbitsUntil (orbitsRuntimes.back(), dueSample + static_cast<std::int64_t> (std::llround (scAudio.getSampleRate() * 2.0)));
         return std::numeric_limits<double>::infinity();
@@ -14133,7 +14157,8 @@ private:
             return;
         }
 
-        const auto document = canvas.getDiscOrbits (handle, index);
+        auto document = canvas.getDiscOrbits (handle, index);
+        document.projectTempoBpm = globalTempoBpm;
         const auto safeThis = juce::Component::SafePointer<MainComponent> (this);
         auto* editor = new OrbitsEditorComponent (
             document,
@@ -14153,12 +14178,31 @@ private:
                         if (commitLane) commitLane (code, seconds);
                     }, "Orbits SC Lane");
             },
+            [safeThis] (const juce::String& patch, float duration, std::function<void (juce::String, float)> saveLane)
+            {
+                if (safeThis == nullptr) return;
+                safeThis->openPipeWorldPdEditor (patch, duration,
+                    [commitLane = std::move (saveLane)] (const juce::String& code, float seconds)
+                    {
+                        if (commitLane) commitLane (code, seconds);
+                    }, "Orbits Pd Lane");
+            },
             [safeThis] (const OrbitsLane& lane)
             {
                 if (safeThis == nullptr) return;
                 DiscAudioTrigger trigger;
-                trigger.scCode = lane.scCode;
-                trigger.scDurationSeconds = lane.durationSeconds;
+                if (lane.playback == OrbitsLane::PlaybackType::pureData)
+                {
+                    trigger.pdPatch = lane.pdPatch;
+                    trigger.pdDurationSeconds = lane.durationSeconds;
+                }
+                else
+                {
+                    trigger.scCode = lane.scCode;
+                    trigger.scDurationSeconds = lane.durationSeconds;
+                }
+                trigger.gain = lane.gain;
+                trigger.pan = lane.pan;
                 safeThis->scAudio.trigger (trigger);
             });
 
@@ -15223,6 +15267,20 @@ int main (int argc, char** argv)
     smokeLine.start = { 0.0f, 0.5f };
     smokeLine.end = { 1.0f, 0.5f };
     smokeLine.sound.scCode = "Out.ar(out, SinOsc.ar(440) * 0.05);";
+    smokeLine.sound.pdPatch = "#N canvas 0 0 320 220 10;\n#X obj 20 20 osc~ 440;";
+    smokeLine.sound.playback = OrbitsLane::PlaybackType::pureData;
+    smokeLine.sound.name = "Persistence line";
+    smokeLine.sound.durationSeconds = 2.5f;
+    smokeLine.sound.probability = 0.63f;
+    smokeLine.sound.gain = 0.72f;
+    smokeLine.sound.pan = -0.25f;
+    smokeLine.sound.colourIndex = 4;
+    orbitsBefore.projectTempoBpm = 144.0;
+    orbitsBefore.snapToMusicalGrid = true;
+    orbitsBefore.snapDivisionsPerBeat = 8;
+    orbitsBefore.tracks.front().clockMode = OrbitsTrack::ClockMode::ratio;
+    orbitsBefore.tracks.front().tempoRatio = 0.5;
+    orbitsBefore.tracks.front().resetPhaseOnStart = false;
     orbitsBefore.tracks.front().lines.push_back (smokeLine);
     orbitsBefore.refreshTriggerPhases();
     const auto orbitsAfter = OrbitsDocument::fromValueTree (orbitsBefore.toValueTree());
@@ -15230,6 +15288,18 @@ int main (int argc, char** argv)
         || orbitsAfter.tracks.empty()
         || orbitsAfter.tracks.front().lines.size() != 1
         || orbitsAfter.tracks.front().lines.front().sound.scCode.isEmpty()
+        || orbitsAfter.tracks.front().lines.front().sound.pdPatch.isEmpty()
+        || orbitsAfter.tracks.front().lines.front().sound.playback != OrbitsLane::PlaybackType::pureData
+        || orbitsAfter.tracks.front().lines.front().sound.name != "Persistence line"
+        || std::abs (orbitsAfter.tracks.front().lines.front().sound.probability - 0.63f) > 0.001f
+        || std::abs (orbitsAfter.tracks.front().lines.front().sound.gain - 0.72f) > 0.001f
+        || std::abs (orbitsAfter.tracks.front().lines.front().sound.pan + 0.25f) > 0.001f
+        || orbitsAfter.tracks.front().lines.front().sound.colourIndex != 4
+        || ! orbitsAfter.snapToMusicalGrid
+        || orbitsAfter.snapDivisionsPerBeat != 8
+        || orbitsAfter.tracks.front().clockMode != OrbitsTrack::ClockMode::ratio
+        || std::abs (orbitsAfter.effectiveBpm (orbitsAfter.tracks.front()) - 72.0) > 0.001
+        || orbitsAfter.tracks.front().resetPhaseOnStart
         || orbitsAfter.tracks.front().lines.front().triggerPhases.empty()
         || std::abs (orbitsAfter.tracks.front().bpm - orbitsBefore.tracks.front().bpm) > 0.001
         || std::abs (orbitsAfter.loopDurationSeconds (orbitsAfter.tracks.front())
