@@ -112,6 +112,7 @@ private:
     juce::TextButton auditionButton { "Audition" };
     juce::TextButton deleteLineButton { "Delete line" };
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
+    juce::TextButton trackTabButton { "Track" }, shapeTabButton { "Shape" }, soundTabButton { "Sound" };
     juce::ComboBox trackBox;
     juce::ComboBox clockModeBox, snapDivisionBox, playbackBox, lineColourBox;
     juce::ToggleButton hideButton { "Hide track" };
@@ -143,12 +144,16 @@ private:
     std::vector<OrbitsDocument> undoHistory, redoHistory;
     bool restoringHistory = false;
     bool sliderGestureActive = false;
+    enum class InspectorTab { track, shape, sound };
+    InspectorTab inspectorTab = InspectorTab::track;
 
     OrbitsTrack* track();
     OrbitsTriggerLine* line();
     void configure();
     void configureSlider (juce::Slider&, double minimum, double maximum, double interval);
     void refresh();
+    void setInspectorTab (InspectorTab);
+    void updateInspectorVisibility();
     void changed (bool recomputeIntersections = true);
     void editSelectedLine();
     void pushUndoState();

@@ -638,11 +638,21 @@ void OrbitsEditorComponent::configure()
     canvas->onBeginEdit = [this] { pushUndoState(); };
     canvas->onUndo = [this] { undo(); };
     canvas->onRedo = [this] { redo(); };
-    canvas->onSelectionChanged = [this] { refresh(); };
-    canvas->onLineCreated = [this] (int) { refresh(); editSelectedLine(); };
+    canvas->onSelectionChanged = [this]
+    {
+        if (line() != nullptr) inspectorTab = InspectorTab::sound;
+        refresh();
+    };
+    canvas->onLineCreated = [this] (int)
+    {
+        inspectorTab = InspectorTab::sound;
+        refresh();
+        editSelectedLine();
+    };
 
     for (auto* button : { &addTrackButton, &removeTrackButton, &playButton, &stopButton, &undoButton, &redoButton }) addAndMakeVisible (*button);
     for (auto* button : { &editSoundButton, &auditionButton, &deleteLineButton }) inspectorContent.addAndMakeVisible (*button);
+    for (auto* button : { &trackTabButton, &shapeTabButton, &soundTabButton }) inspectorContent.addAndMakeVisible (*button);
     inspectorContent.addAndMakeVisible (trackBox);
     for (auto* combo : { &clockModeBox, &snapDivisionBox, &playbackBox, &lineColourBox }) inspectorContent.addAndMakeVisible (*combo);
     inspectorContent.addAndMakeVisible (lineNameEditor);
@@ -717,6 +727,24 @@ void OrbitsEditorComponent::configure()
     snapDivisionBox.addItemList ({ "1 per beat", "2 per beat", "4 per beat", "8 per beat", "16 per beat" }, 1);
     playbackBox.addItemList ({ "SuperCollider", "Pure Data (Pd)" }, 1);
     lineColourBox.addItemList ({ "Track colour", "Aqua", "Pink", "Gold", "Violet", "Mint", "Coral", "Blue", "Lime" }, 1);
+
+    for (auto* button : { &trackTabButton, &shapeTabButton, &soundTabButton })
+    {
+        button->setClickingTogglesState (false);
+        button->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff202a27));
+        button->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff1688f8));
+        button->setColour (juce::TextButton::textColourOffId, juce::Colours::white.withAlpha (0.72f));
+        button->setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    }
+    trackTabButton.setConnectedEdges (juce::Button::ConnectedOnRight);
+    shapeTabButton.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+    soundTabButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    trackTabButton.setTooltip ("Track timing and playback settings");
+    shapeTabButton.setTooltip ("Spiral shape and snapping settings");
+    soundTabButton.setTooltip ("Selected sound line settings");
+    trackTabButton.onClick = [this] { setInspectorTab (InspectorTab::track); };
+    shapeTabButton.onClick = [this] { setInspectorTab (InspectorTab::shape); };
+    soundTabButton.onClick = [this] { setInspectorTab (InspectorTab::sound); };
 
     addTrackButton.onClick = [this] { addTrack(); };
     removeTrackButton.onClick = [this] { removeTrack(); };
@@ -965,7 +993,59 @@ void OrbitsEditorComponent::refresh()
     removeTrackButton.setEnabled (document.tracks.size() > 1);
     undoButton.setEnabled (! undoHistory.empty());
     redoButton.setEnabled (! redoHistory.empty());
+    updateInspectorVisibility();
     canvas->repaint();
+}
+
+void OrbitsEditorComponent::setInspectorTab (InspectorTab tab)
+{
+    inspectorTab = tab;
+    inspectorViewport.setViewPosition (0, 0);
+    updateInspectorVisibility();
+    resized();
+    repaint();
+}
+
+void OrbitsEditorComponent::updateInspectorVisibility()
+{
+    trackTabButton.setToggleState (inspectorTab == InspectorTab::track, juce::dontSendNotification);
+    shapeTabButton.setToggleState (inspectorTab == InspectorTab::shape, juce::dontSendNotification);
+    soundTabButton.setToggleState (inspectorTab == InspectorTab::sound, juce::dontSendNotification);
+    for (auto* button : { &trackTabButton, &shapeTabButton, &soundTabButton })
+        button->setAlpha (button->getToggleState() ? 1.0f : 0.82f);
+
+    const std::array<juce::Component*, 12> trackControls {
+        &trackLabel, &trackBox, &hideButton, &muteButton, &clockModeLabel, &clockModeBox,
+        &ratioLabel, &ratioSlider, &resetPhaseButton, &bpmLabel, &bpmSlider, &meterLabel
+    };
+    const std::array<juce::Component*, 5> trackControlsMore {
+        &numeratorLabel, &numeratorSlider, &denominatorLabel, &denominatorSlider, &barsLabel
+    };
+    const std::array<juce::Component*, 1> trackControlsLast { &barsSlider };
+    const std::array<juce::Component*, 12> shapeControls {
+        &shapeLabel, &thicknessLabel, &thicknessSlider, &warpLabel, &warpSlider, &twistLabel,
+        &twistSlider, &phaseLabel, &phaseSlider, &xRotationLabel, &xRotationSlider, &yRotationLabel
+    };
+    const std::array<juce::Component*, 9> shapeControlsMore {
+        &yRotationSlider, &xOffsetLabel, &xOffsetSlider, &yOffsetLabel, &yOffsetSlider,
+        &snapLabel, &snapButton, &snapDivisionBox, nullptr
+    };
+    const std::array<juce::Component*, 19> soundControls {
+        &soundLineLabel, &lineNameLabel, &lineNameEditor, &playbackLabel, &playbackBox,
+        &lineColourLabel, &lineColourBox, &lineEnabledButton, &durationLabel, &durationSlider,
+        &probabilityLabel, &probabilitySlider, &gainLabel, &gainSlider, &panLabel, &panSlider,
+        &editSoundButton, &auditionButton, &deleteLineButton
+    };
+    const auto setVisible = [] (const auto& controls, bool visible)
+    {
+        for (auto* control : controls) if (control != nullptr) control->setVisible (visible);
+    };
+    setVisible (trackControls, inspectorTab == InspectorTab::track);
+    setVisible (trackControlsMore, inspectorTab == InspectorTab::track);
+    setVisible (trackControlsLast, inspectorTab == InspectorTab::track);
+    setVisible (shapeControls, inspectorTab == InspectorTab::shape);
+    setVisible (shapeControlsMore, inspectorTab == InspectorTab::shape);
+    setVisible (soundControls, inspectorTab == InspectorTab::sound);
 }
 
 void OrbitsEditorComponent::timerCallback()
@@ -1041,74 +1121,97 @@ void OrbitsEditorComponent::resized()
     canvas->setBounds (body.reduced (12, 10));
 
     const auto contentWidth = juce::jmax (280, inspectorViewport.getWidth() - inspectorViewport.getScrollBarThickness() - 4);
-    inspectorContent.setSize (contentWidth, juce::jmax (inspectorViewport.getHeight(), 900));
+    inspectorContent.setSize (contentWidth, inspectorViewport.getHeight());
     auto inspector = inspectorContent.getLocalBounds().reduced (4, 2);
 
-    trackLabel.setBounds (inspector.removeFromTop (18));
-    trackBox.setBounds (inspector.removeFromTop (34));
-    inspector.removeFromTop (6);
-    auto trackActions = inspector.removeFromTop (28);
-    hideButton.setBounds (trackActions.removeFromLeft (140));
-    muteButton.setBounds (trackActions);
-    inspector.removeFromTop (10);
+    auto tabs = inspector.removeFromTop (32);
+    const auto tabWidth = tabs.getWidth() / 3;
+    trackTabButton.setBounds (tabs.removeFromLeft (tabWidth));
+    shapeTabButton.setBounds (tabs.removeFromLeft (tabWidth));
+    soundTabButton.setBounds (tabs);
+    inspector.removeFromTop (18);
 
-    clockModeLabel.setBounds (inspector.removeFromTop (18));
-    clockModeBox.setBounds (inspector.removeFromTop (30));
-    auto clockOptions = inspector.removeFromTop (34);
-    ratioLabel.setBounds (clockOptions.removeFromLeft (90)); ratioSlider.setBounds (clockOptions);
-    resetPhaseButton.setBounds (inspector.removeFromTop (28));
-    inspector.removeFromTop (8);
+    if (inspectorTab == InspectorTab::track)
+    {
+        trackLabel.setBounds (inspector.removeFromTop (18));
+        trackBox.setBounds (inspector.removeFromTop (34));
+        inspector.removeFromTop (6);
+        auto trackActions = inspector.removeFromTop (28);
+        hideButton.setBounds (trackActions.removeFromLeft (140));
+        muteButton.setBounds (trackActions);
+        inspector.removeFromTop (18);
+
+        clockModeLabel.setBounds (inspector.removeFromTop (18));
+        clockModeBox.setBounds (inspector.removeFromTop (30));
+        auto clockOptions = inspector.removeFromTop (34);
+        ratioLabel.setBounds (clockOptions.removeFromLeft (90)); ratioSlider.setBounds (clockOptions);
+        resetPhaseButton.setBounds (inspector.removeFromTop (28));
+        inspector.removeFromTop (16);
+
+        auto parameterRow = [&inspector] (juce::Label& label, juce::Component& control)
+        {
+            auto row = inspector.removeFromTop (38);
+            label.setBounds (row.removeFromLeft (98));
+            control.setBounds (row);
+        };
+        parameterRow (bpmLabel, bpmSlider);
+        meterLabel.setBounds (inspector.removeFromTop (18));
+        auto meter = inspector.removeFromTop (46);
+        auto meterLeft = meter.removeFromLeft ((meter.getWidth() - 8) / 2); meter.removeFromLeft (8);
+        numeratorLabel.setBounds (meterLeft.removeFromTop (15)); numeratorSlider.setBounds (meterLeft);
+        denominatorLabel.setBounds (meter.removeFromTop (15)); denominatorSlider.setBounds (meter);
+        parameterRow (barsLabel, barsSlider);
+        return;
+    }
+
+    if (inspectorTab == InspectorTab::shape)
+    {
+        shapeLabel.setBounds (inspector.removeFromTop (20));
+        inspector.removeFromTop (8);
+        auto parameterPair = [&inspector] (juce::Label& leftLabel, juce::Component& left,
+                                           juce::Label& rightLabel, juce::Component& right)
+        {
+            auto row = inspector.removeFromTop (62);
+            auto leftArea = row.removeFromLeft ((row.getWidth() - 8) / 2); row.removeFromLeft (8);
+            leftLabel.setBounds (leftArea.removeFromTop (17)); left.setBounds (leftArea);
+            rightLabel.setBounds (row.removeFromTop (17)); right.setBounds (row);
+        };
+        parameterPair (thicknessLabel, thicknessSlider, warpLabel, warpSlider);
+        parameterPair (twistLabel, twistSlider, phaseLabel, phaseSlider);
+        parameterPair (xRotationLabel, xRotationSlider, yRotationLabel, yRotationSlider);
+        parameterPair (xOffsetLabel, xOffsetSlider, yOffsetLabel, yOffsetSlider);
+        inspector.removeFromTop (18);
+        snapLabel.setBounds (inspector.removeFromTop (20));
+        auto snapRow = inspector.removeFromTop (34);
+        snapButton.setBounds (snapRow.removeFromLeft (142)); snapDivisionBox.setBounds (snapRow);
+        return;
+    }
+
+    soundLineLabel.setBounds (inspector.removeFromTop (24));
+    inspector.removeFromTop (12);
+    if (line() == nullptr)
+        return;
 
     auto parameterRow = [&inspector] (juce::Label& label, juce::Component& control)
     {
-        auto row = inspector.removeFromTop (34);
-        label.setBounds (row.removeFromLeft (98));
+        auto row = inspector.removeFromTop (40);
+        label.setBounds (row.removeFromLeft (82));
         control.setBounds (row);
     };
-
-    parameterRow (bpmLabel, bpmSlider);
-    meterLabel.setBounds (inspector.removeFromTop (18));
-    auto meter = inspector.removeFromTop (42);
-    auto meterLeft = meter.removeFromLeft ((meter.getWidth() - 8) / 2); meter.removeFromLeft (8);
-    numeratorLabel.setBounds (meterLeft.removeFromTop (15)); numeratorSlider.setBounds (meterLeft);
-    denominatorLabel.setBounds (meter.removeFromTop (15)); denominatorSlider.setBounds (meter);
-    parameterRow (barsLabel, barsSlider);
+    parameterRow (lineNameLabel, lineNameEditor);
+    parameterRow (playbackLabel, playbackBox);
+    parameterRow (lineColourLabel, lineColourBox);
+    lineEnabledButton.setBounds (inspector.removeFromTop (30));
     inspector.removeFromTop (8);
-    shapeLabel.setBounds (inspector.removeFromTop (20));
-
-    auto parameterPair = [&inspector] (juce::Label& leftLabel, juce::Component& left,
-                                       juce::Label& rightLabel, juce::Component& right)
-    {
-        auto row = inspector.removeFromTop (48);
-        auto leftArea = row.removeFromLeft ((row.getWidth() - 8) / 2); row.removeFromLeft (8);
-        leftLabel.setBounds (leftArea.removeFromTop (15)); left.setBounds (leftArea);
-        rightLabel.setBounds (row.removeFromTop (15)); right.setBounds (row);
-    };
-    parameterPair (thicknessLabel, thicknessSlider, warpLabel, warpSlider);
-    parameterPair (twistLabel, twistSlider, phaseLabel, phaseSlider);
-    parameterPair (xRotationLabel, xRotationSlider, yRotationLabel, yRotationSlider);
-    parameterPair (xOffsetLabel, xOffsetSlider, yOffsetLabel, yOffsetSlider);
-    inspector.removeFromTop (8);
-    snapLabel.setBounds (inspector.removeFromTop (18));
-    auto snapRow = inspector.removeFromTop (32);
-    snapButton.setBounds (snapRow.removeFromLeft (142)); snapDivisionBox.setBounds (snapRow);
-    inspector.removeFromTop (10);
-    soundLineLabel.setBounds (inspector.removeFromTop (20));
-    auto lineNameRow = inspector.removeFromTop (32);
-    lineNameLabel.setBounds (lineNameRow.removeFromLeft (72)); lineNameEditor.setBounds (lineNameRow);
-    auto playbackRow = inspector.removeFromTop (32);
-    playbackLabel.setBounds (playbackRow.removeFromLeft (72)); playbackBox.setBounds (playbackRow);
-    auto colourRow = inspector.removeFromTop (32);
-    lineColourLabel.setBounds (colourRow.removeFromLeft (72)); lineColourBox.setBounds (colourRow);
-    lineEnabledButton.setBounds (inspector.removeFromTop (27));
     parameterRow (durationLabel, durationSlider);
     parameterRow (probabilityLabel, probabilitySlider);
     parameterRow (gainLabel, gainSlider);
     parameterRow (panLabel, panSlider);
-    inspector.removeFromTop (6);
-    auto lineActions = inspector.removeFromTop (36);
+    inspector.removeFromTop (14);
+    auto lineActions = inspector.removeFromTop (38);
     editSoundButton.setBounds (lineActions.removeFromLeft (92)); lineActions.removeFromLeft (6);
     auditionButton.setBounds (lineActions.removeFromLeft (86)); lineActions.removeFromLeft (6);
     deleteLineButton.setBounds (lineActions);
+    return;
 }
 }
