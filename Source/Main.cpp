@@ -56,6 +56,11 @@ constexpr int maxDiscElementsPerOrbitRing = 16;
 constexpr float discOrbitRingSpacing = 12.0f;
 constexpr const char* pdStdPathPrefix = "std:";
 
+double samplePositionForLoopCycle (double epochSample, std::int64_t cycle, double loopSamples) noexcept
+{
+    return epochSample + static_cast<double> (cycle) * loopSamples;
+}
+
 class PointSpatialIndex
 {
 public:
@@ -945,12 +950,16 @@ public:
     struct MixerChannel
     {
         int discIndex = -1;
+        int orbitsIndex = -1;
+        int trackIndex = -1;
         juce::String name;
+        juce::String tag;
         float level = 1.0f;
         float pan = 0.0f;
         bool muted = false;
         bool solo = false;
         bool selected = false;
+        int outputRoute = 0;
     };
 
     struct PerformanceSnapshot
@@ -1758,23 +1767,52 @@ public:
         for (int i = 0; i < static_cast<int> (discs().size()); ++i)
         {
             const auto& disc = discs()[static_cast<size_t> (i)];
-            channels.push_back ({ i, "Disc " + juce::String (i + 1), disc.level, disc.pan, disc.muted, disc.solo, i == selectedDisc });
+            MixerChannel discChannel;
+            discChannel.discIndex = i; discChannel.name = "Disc " + juce::String (i + 1); discChannel.tag = "DISC " + juce::String (i + 1);
+            discChannel.level = disc.level; discChannel.pan = disc.pan; discChannel.muted = disc.muted; discChannel.solo = disc.solo; discChannel.selected = i == selectedDisc;
+            channels.push_back (std::move (discChannel));
+            for (int orbitsIndex = 0; orbitsIndex < static_cast<int> (disc.orbits.size()); ++orbitsIndex)
+                for (int trackIndex = 0; trackIndex < static_cast<int> (disc.orbits[static_cast<size_t> (orbitsIndex)].tracks.size()); ++trackIndex)
+                {
+                    const auto& track = disc.orbits[static_cast<size_t> (orbitsIndex)].tracks[static_cast<size_t> (trackIndex)];
+                    MixerChannel trackChannel;
+                    trackChannel.discIndex = i; trackChannel.orbitsIndex = orbitsIndex; trackChannel.trackIndex = trackIndex;
+                    trackChannel.name = track.name; trackChannel.tag = "ORBITS " + juce::String (orbitsIndex + 1);
+                    trackChannel.level = track.gain; trackChannel.pan = track.pan; trackChannel.muted = track.muted; trackChannel.solo = track.solo;
+                    trackChannel.selected = i == selectedDisc; trackChannel.outputRoute = static_cast<int> (track.outputRoute);
+                    channels.push_back (std::move (trackChannel));
+                }
         }
         return channels;
     }
 
-    void setMixerChannel (int index, float level, float pan, bool muted, bool solo)
+    void setMixerChannel (int index, float level, float pan, bool muted, bool solo, int outputRoute = -1)
     {
-        if (! juce::isPositiveAndBelow (index, static_cast<int> (discs().size()))) return;
-        auto& disc = discs()[static_cast<size_t> (index)];
-        disc.level = juce::jlimit (0.0f, 1.5f, level); disc.pan = juce::jlimit (-1.0f, 1.0f, pan);
-        disc.muted = muted; disc.solo = solo; notifyChanged(); repaint();
+        const auto channels = getMixerChannels();
+        if (! juce::isPositiveAndBelow (index, static_cast<int> (channels.size()))) return;
+        const auto& channel = channels[static_cast<size_t> (index)];
+        auto& disc = discs()[static_cast<size_t> (channel.discIndex)];
+        if (channel.trackIndex >= 0)
+        {
+            auto& track = disc.orbits[static_cast<size_t> (channel.orbitsIndex)].tracks[static_cast<size_t> (channel.trackIndex)];
+            track.gain = juce::jlimit (0.0f, 1.5f, level); track.pan = juce::jlimit (-1.0f, 1.0f, pan);
+            track.muted = muted; track.solo = solo;
+            if (outputRoute >= 0) track.outputRoute = static_cast<OrbitsTrack::OutputRoute> (juce::jlimit (0, 2, outputRoute));
+        }
+        else
+        {
+            disc.level = juce::jlimit (0.0f, 1.5f, level); disc.pan = juce::jlimit (-1.0f, 1.0f, pan);
+            disc.muted = muted; disc.solo = solo;
+        }
+        notifyChanged(); repaint();
     }
 
     void selectMixerChannel (int index)
     {
-        if (! juce::isPositiveAndBelow (index, static_cast<int> (discs().size()))) return;
-        selectedDisc = index; selectedRoute = selectedNode = -1; notifySelectionChanged(); repaint(); requestDiscPanel();
+        const auto channels = getMixerChannels();
+        if (! juce::isPositiveAndBelow (index, static_cast<int> (channels.size()))) return;
+        selectedDisc = channels[static_cast<size_t> (index)].discIndex;
+        selectedRoute = selectedNode = -1; notifySelectionChanged(); repaint(); requestDiscPanel();
     }
 
     DiscInfo getDiscInfo (const DiscHandle& handle) const
@@ -10191,7 +10229,7 @@ public:
         g.setColour (juce::Colours::white.withAlpha (0.94f)); g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
         g.drawText ("Mixer", 24, 18, 180, 28, juce::Justification::centredLeft);
         g.setColour (juce::Colour (0xff87938d)); g.setFont (juce::FontOptions (11.0f));
-        g.drawText (channels.empty() ? "Add discs to create channels" : juce::String (channels.size()) + " disc channels", 24, 45, 220, 20, juce::Justification::centredLeft);
+        g.drawText (channels.empty() ? "Add discs to create channels" : juce::String (channels.size()) + " channels", 24, 45, 220, 20, juce::Justification::centredLeft);
 
         if (isRecording != nullptr && isRecording())
         {
@@ -10223,6 +10261,12 @@ public:
         {
             auto channel = channels[static_cast<size_t> (activeStrip)]; channel.solo = ! channel.solo;
             canvas.setMixerChannel (activeStrip, channel.level, channel.pan, channel.muted, channel.solo); changed(); activeControl = Control::none; return;
+        }
+        if (! master && channels[static_cast<size_t> (activeStrip)].trackIndex >= 0 && routeBounds (activeStrip).contains (event.position))
+        {
+            auto channel = channels[static_cast<size_t> (activeStrip)]; channel.outputRoute = (channel.outputRoute + 1) % 3;
+            canvas.setMixerChannel (activeStrip, channel.level, channel.pan, channel.muted, channel.solo, channel.outputRoute);
+            changed(); activeControl = Control::none; return;
         }
         if (! master && panBounds (activeStrip).expanded (8.0f).contains (event.position)) { activeControl = Control::pan; updatePan (event.position.x); }
         else if (faderBounds (activeStrip).expanded (14.0f, 8.0f).contains (event.position)) { activeControl = Control::level; updateLevel (event.position.y); }
@@ -10265,6 +10309,7 @@ private:
     static constexpr float stripWidth = 108.0f, stripGap = 12.0f, left = 24.0f, top = 82.0f;
     juce::Rectangle<float> stripBounds (int index) const { return { left + static_cast<float> (index) * (stripWidth + stripGap), top, stripWidth, static_cast<float> (getHeight()) - top - 24.0f }; }
     juce::Rectangle<float> panBounds (int index) const { return stripBounds (index).reduced (13.0f).withTrimmedTop (78.0f).removeFromTop (9.0f); }
+    juce::Rectangle<float> routeBounds (int index) const { auto b = stripBounds (index); return { b.getX() + 26.0f, b.getY() + 103.0f, b.getWidth() - 52.0f, 20.0f }; }
     juce::Rectangle<float> faderBounds (int index) const { auto b = stripBounds (index); return { b.getCentreX() - 15.0f, b.getY() + 128.0f, 30.0f, b.getHeight() - 194.0f }; }
     juce::Rectangle<float> muteBounds (int index) const { auto b = stripBounds (index); return { b.getX() + 14.0f, b.getBottom() - 43.0f, 34.0f, 25.0f }; }
     juce::Rectangle<float> soloBounds (int index) const { auto b = stripBounds (index); return { b.getRight() - 48.0f, b.getBottom() - 43.0f, 34.0f, 25.0f }; }
@@ -10279,7 +10324,8 @@ private:
         g.setColour (channel.selected ? accent.withAlpha (0.16f) : juce::Colour (0xff151c19)); g.fillRoundedRectangle (strip, 6.0f);
         g.setColour (accent.withAlpha (master ? 0.72f : channel.selected ? 0.58f : 0.24f)); g.drawRoundedRectangle (strip, 6.0f, 1.0f);
         auto tag = strip.removeFromTop (28.0f).reduced (9.0f, 7.0f); g.setColour (accent.withAlpha (0.18f)); g.fillRoundedRectangle (tag, 3.0f);
-        g.setColour (accent.withAlpha (0.88f)); g.setFont (juce::FontOptions (9.0f, juce::Font::bold)); g.drawText (master ? "MASTER" : "DISC " + juce::String (index + 1), tag, juce::Justification::centred);
+        g.setColour (accent.withAlpha (0.88f)); g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+        g.drawText (master ? "MASTER" : (channel.tag.isNotEmpty() ? channel.tag : "CHANNEL"), tag, juce::Justification::centred);
         g.setColour (juce::Colours::white.withAlpha (0.88f)); g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawFittedText (channel.name, stripBounds (index).withTrimmedTop (34.0f).removeFromTop (30.0f).toNearestInt().reduced (5, 0), juce::Justification::centred, 1);
         if (! master)
@@ -10287,6 +10333,14 @@ private:
             const auto pan = panBounds (index); g.setColour (juce::Colour (0xff34423c)); g.fillRoundedRectangle (pan, 3.0f);
             g.setColour (accent.withAlpha (0.85f)); const auto x = pan.getX() + pan.getWidth() * (channel.pan + 1.0f) * 0.5f; g.fillEllipse (x - 5.0f, pan.getCentreY() - 5.0f, 10.0f, 10.0f);
             g.setColour (juce::Colour (0xff87938d)); g.setFont (juce::FontOptions (9.0f)); g.drawText ("PAN", pan.translated (0, -16), juce::Justification::centred);
+            if (channel.trackIndex >= 0)
+            {
+                const auto route = routeBounds (index);
+                g.setColour (juce::Colour (0xff202925)); g.fillRoundedRectangle (route, 3.0f);
+                static constexpr const char* names[] { "ST", "L", "R" };
+                g.setColour (juce::Colours::white.withAlpha (0.66f)); g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+                g.drawText (names[juce::jlimit (0, 2, channel.outputRoute)], route, juce::Justification::centred);
+            }
         }
         const auto fader = faderBounds (index); const auto norm = juce::jlimit (0.0f, 1.0f, channel.level / 1.5f); const auto y = fader.getBottom() - fader.getHeight() * norm;
         g.setColour (juce::Colour (0xff34423c)); g.fillRoundedRectangle (fader.withWidth (7.0f).withCentre (fader.getCentre()), 3.5f);
@@ -11804,6 +11858,8 @@ public:
 
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
     {
+        const auto elapsedBeforePrepare = currentTransportSamples();
+        const auto beatBeforePrepare = currentTransportBeat();
         const auto safeRate = juce::jlimit (8000.0, 384000.0, sampleRate > 0.0 ? sampleRate : 44100.0);
         const auto safeBlockSize = juce::jlimit (16, 32768, samplesPerBlockExpected > 0 ? samplesPerBlockExpected : 512);
         auto outputChannels = 2;
@@ -11821,7 +11877,10 @@ public:
         scratchInput.setSize (std::max ({ 2, outputChannels, inputChannels }), safeBlockSize, false, false, false);
         scAudio.prepare (safeRate, safeBlockSize, outputChannels, inputChannels);
         scAudio.setTempo (globalTempoBpm);
+        transportElapsedSamples = elapsedBeforePrepare;
         transportStartedAtSample = scAudio.getRenderedSamplePosition();
+        transportBeatAtAnchor = beatBeforePrepare;
+        transportBeatAnchorSample = transportStartedAtSample;
         juce::MessageManager::callAsync ([safeThis = juce::Component::SafePointer<MainComponent> (this)]
         {
             if (safeThis != nullptr)
@@ -12586,7 +12645,7 @@ private:
     std::vector<ArrangementScene> arrangementScenes;
     int activeArrangementScene = -1;
     bool arrangementPlaying = false;
-    std::int64_t arrangementSceneStartSample = 0;
+    double arrangementSceneStartBeat = 0.0;
     juce::Label layersTitleLabel;
     juce::Label layersPathLabel;
     juce::TextButton layersMainButton;
@@ -12708,7 +12767,13 @@ private:
     {
         juce::String key;
         OrbitsDocument document;
+        std::vector<double> loopEpochSamples;
+        std::vector<std::int64_t> nextLoopCycles;
+        std::vector<double> nextLoopStartExactSamples;
         std::vector<std::int64_t> nextLoopStartSamples;
+        std::vector<int> completedLoops;
+        std::vector<bool> trackRunning;
+        std::vector<std::int64_t> lastProcessedBoundary;
     };
     std::vector<OrbitsRuntime> orbitsRuntimes;
     struct ActiveDisc { juce::String key; std::int64_t untilSample = 0; };
@@ -12726,6 +12791,13 @@ private:
         std::int64_t nextSample = 0;
     };
     std::vector<PendingElementChain> pendingElementChains;
+    struct PendingVisualRuntimeStart
+    {
+        std::int64_t dueSample = 0;
+        std::vector<CarouselDocument> carousels;
+        std::vector<juce::String> pipeStates;
+    };
+    std::vector<PendingVisualRuntimeStart> pendingVisualRuntimeStarts;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
     std::unique_ptr<juce::PropertiesFile> startupSettings;
     std::unique_ptr<StartupChooser> startupChooser;
@@ -12799,6 +12871,8 @@ private:
     std::int64_t transportElapsedSamples = 0;
     std::int64_t transportStartedAtSample = 0;
     std::int64_t transportPausedAtSample = -1;
+    double transportBeatAtAnchor = 0.0;
+    std::int64_t transportBeatAnchorSample = 0;
 
     juce::Array<juce::File> recentProjectFiles()
     {
@@ -12928,11 +13002,14 @@ private:
             return;
 
         const auto now = scAudio.getRenderedSamplePosition();
+        const auto beatNow = currentTransportBeat();
         if (transportRunning)
             transportElapsedSamples += juce::jmax<std::int64_t> (0, now - transportStartedAtSample);
 
         transportRunning = shouldRun;
         transportStartedAtSample = now;
+        transportBeatAtAnchor = beatNow;
+        transportBeatAnchorSample = now;
         if (! transportRunning)
         {
             // Keep future starts parked while already sounding voices finish naturally.
@@ -12945,13 +13022,21 @@ private:
             for (auto& chain : pendingElementChains)
                 if (chain.nextElement >= 0)
                     chain.nextSample += pausedSamples;
+            for (auto& pending : pendingVisualRuntimeStarts)
+                pending.dueSample += pausedSamples;
             for (auto& active : activeDiscs)
                 if (active.untilSample != std::numeric_limits<std::int64_t>::max()
                     && active.untilSample > transportPausedAtSample)
                     active.untilSample += pausedSamples;
             for (auto& runtime : orbitsRuntimes)
+            {
+                for (auto& epoch : runtime.loopEpochSamples)
+                    epoch += static_cast<double> (pausedSamples);
+                for (auto& nextLoop : runtime.nextLoopStartExactSamples)
+                    nextLoop += static_cast<double> (pausedSamples);
                 for (auto& nextLoop : runtime.nextLoopStartSamples)
                     nextLoop += pausedSamples;
+            }
             scAudio.resumeScheduledEvents();
             transportPausedAtSample = -1;
         }
@@ -12975,7 +13060,13 @@ private:
 
     double currentTransportBeat() const
     {
-        return static_cast<double> (currentTransportSamples()) / juce::jmax (1.0, scAudio.getSampleRate())
+        if (! transportRunning)
+            return transportBeatAtAnchor;
+
+        const auto samplesSinceAnchor = juce::jmax<std::int64_t> (
+            0, scAudio.getRenderedSamplePosition() - transportBeatAnchorSample);
+        return transportBeatAtAnchor
+             + static_cast<double> (samplesSinceAnchor) / juce::jmax (1.0, scAudio.getSampleRate())
              * globalTempoBpm / 60.0;
     }
 
@@ -13061,7 +13152,7 @@ private:
         canvas.setFlowTiming (globalTempoBpm, beatsForGridChoice (gridUnitChoice));
         canvas.resetFlowToStart();
         setTransportRunning (true);
-        arrangementSceneStartSample = currentTransportSamples();
+        arrangementSceneStartBeat = currentTransportBeat();
         dataPaneOpen = false; selectedElement = {};
         refreshDataPane(); refreshLayersPanel(); updateStatus(); resized(); repaint();
     }
@@ -13074,12 +13165,15 @@ private:
         transportElapsedSamples = 0;
         transportStartedAtSample = scAudio.getRenderedSamplePosition();
         transportPausedAtSample = -1;
+        transportBeatAtAnchor = 0.0;
+        transportBeatAnchorSample = transportStartedAtSample;
         canvas.resetFlowToStart();
         flowButton.setToggleState (false, juce::dontSendNotification);
         pauseButton.setToggleState (false, juce::dontSendNotification);
         stopButton.setToggleState (false, juce::dontSendNotification);
         discSequenceStates.clear();
         pendingElementChains.clear();
+        pendingVisualRuntimeStarts.clear();
         stopPreviewAudio (true);
         updateElapsedTimeLabel();
     }
@@ -13103,17 +13197,15 @@ private:
         const auto now = scAudio.getRenderedSamplePosition();
         if (transportRunning || transportElapsedSamples == 0)
         {
-            const auto horizon = now + static_cast<std::int64_t> (std::llround (scAudio.getSampleRate() * 2.0));
+            const auto horizon = now + static_cast<std::int64_t> (std::llround (scAudio.getSampleRate() * 0.25));
             for (auto& runtime : orbitsRuntimes)
                 scheduleOrbitsUntil (runtime, horizon);
         }
         if (arrangementPlaying && transportRunning
             && juce::isPositiveAndBelow (activeArrangementScene, static_cast<int> (arrangementScenes.size())))
         {
-            const auto samplesPerBar = juce::jmax (1.0, scAudio.getSampleRate() * 60.0 / globalTempoBpm * 4.0);
-            const auto sceneSamples = static_cast<std::int64_t> (std::llround (
-                samplesPerBar * arrangementScenes[static_cast<size_t> (activeArrangementScene)].bars));
-            if (currentTransportSamples() - arrangementSceneStartSample >= sceneSamples)
+            const auto sceneBeats = 4.0 * arrangementScenes[static_cast<size_t> (activeArrangementScene)].bars;
+            if (currentTransportBeat() - arrangementSceneStartBeat >= sceneBeats)
             {
                 const auto next = activeArrangementScene + 1;
                 if (next < static_cast<int> (arrangementScenes.size())) startArrangementScene (next, true);
@@ -13123,14 +13215,42 @@ private:
         if (transportRunning)
             for (auto& chain : pendingElementChains)
             {
-                if (chain.nextElement < 0 || chain.nextSample > now) continue;
-                const auto dueSample = chain.nextSample;
-                const auto duration = dispatchChainElement (chain, dueSample);
-                if (! std::isfinite (duration) || chain.nextElement >= static_cast<int> (chain.triggers.size() + chain.carousels.size() + chain.pipeStates.size() + chain.orbits.size()))
-                    chain.nextElement = -1;
-                else
-                    chain.nextSample = dueSample + static_cast<std::int64_t> (std::llround (duration * scAudio.getSampleRate()));
+                const auto audioLookAhead = now + static_cast<std::int64_t> (
+                    std::llround (scAudio.getSampleRate() * 0.25));
+                int safety = 0;
+                while (chain.nextElement >= 0 && ++safety < 1024)
+                {
+                    const auto nextIsAudio = chain.nextElement < static_cast<int> (chain.triggers.size());
+                    const auto schedulingHorizon = nextIsAudio ? audioLookAhead : now;
+                    if (chain.nextSample > schedulingHorizon) break;
+
+                    const auto dueSample = chain.nextSample;
+                    const auto duration = dispatchChainElement (chain, dueSample);
+                    if (! std::isfinite (duration)
+                        || chain.nextElement >= static_cast<int> (chain.triggers.size() + chain.carousels.size()
+                                                                  + chain.pipeStates.size() + chain.orbits.size()))
+                    {
+                        chain.nextElement = -1;
+                        break;
+                    }
+
+                    chain.nextSample = dueSample + juce::jmax<std::int64_t> (1, static_cast<std::int64_t> (
+                        std::llround (duration * scAudio.getSampleRate())));
+                }
             }
+        if (transportRunning)
+        {
+            for (auto& pending : pendingVisualRuntimeStarts)
+                if (pending.dueSample <= now)
+                {
+                    startVisualRuntimes (pending.carousels, pending.pipeStates);
+                    pending.dueSample = -1;
+                }
+            pendingVisualRuntimeStarts.erase (std::remove_if (pendingVisualRuntimeStarts.begin(), pendingVisualRuntimeStarts.end(), [] (const auto& pending)
+            {
+                return pending.dueSample < 0;
+            }), pendingVisualRuntimeStarts.end());
+        }
         pendingElementChains.erase (std::remove_if (pendingElementChains.begin(), pendingElementChains.end(), [] (const auto& chain)
         {
             return chain.nextElement < 0;
@@ -13208,21 +13328,126 @@ private:
         return 0.0;
     }
 
+    void startVisualRuntimes (const std::vector<CarouselDocument>& carousels,
+                              const std::vector<juce::String>& pipeStates)
+    {
+        if (! carousels.empty())
+        {
+            carouselRuntimes.clear();
+            for (const auto& document : carousels)
+            {
+                auto runtime = std::make_unique<CarouselEditorComponent>();
+                runtime->setSampleClock ([this]
+                {
+                    return static_cast<double> (scAudio.getRenderedSamplePosition())
+                         / juce::jmax (1.0, scAudio.getSampleRate());
+                });
+                runtime->setDocument (document);
+                runtime->onTone = [this] (const CarouselDocument::Item& tone) { triggerCarouselTone (scAudio, tone); };
+                runtime->setRunning (true);
+                carouselRuntimes.push_back (std::move (runtime));
+            }
+            if (carouselPanel != nullptr) carouselPanel->start();
+        }
+
+        if (! pipeStates.empty())
+        {
+            pipeRuntimes.clear();
+            for (const auto& stateText : pipeStates)
+            {
+                auto runtime = otherware::createPipeWorkspaceComponent();
+                otherware::setPipeWorkspaceSampleClock (*runtime, [this]
+                {
+                    return static_cast<double> (scAudio.getRenderedSamplePosition())
+                         / juce::jmax (1.0, scAudio.getSampleRate());
+                });
+                otherware::setPipeWorkspaceDiscTriggerCallback (*runtime, [this] (const auto& disc)
+                {
+                    triggerPipeWorldDisc (scAudio, disc);
+                });
+                otherware::setPipeWorkspaceTempo (*runtime, globalTempoBpm);
+                if (stateText.isNotEmpty())
+                    otherware::applyPipeWorkspaceState (*runtime, juce::JSON::parse (stateText));
+                otherware::setPipeWorkspaceRunning (*runtime, true);
+                pipeRuntimes.push_back (std::move (runtime));
+            }
+            if (pipeElementComponent != nullptr)
+                otherware::setPipeWorkspaceRunning (*pipeElementComponent, true);
+        }
+    }
+
     void scheduleOrbitsUntil (OrbitsRuntime& runtime, std::int64_t horizonSample)
     {
         const auto sampleRate = juce::jmax (1.0, scAudio.getSampleRate());
+        const auto anySolo = std::any_of (runtime.document.tracks.begin(), runtime.document.tracks.end(), [] (const auto& item) { return item.solo; });
+        if (runtime.nextLoopStartExactSamples.size() != runtime.document.tracks.size())
+        {
+            runtime.nextLoopStartExactSamples.resize (runtime.document.tracks.size());
+            for (size_t i = 0; i < runtime.nextLoopStartExactSamples.size(); ++i)
+                runtime.nextLoopStartExactSamples[i] = i < runtime.nextLoopStartSamples.size()
+                                                           ? static_cast<double> (runtime.nextLoopStartSamples[i])
+                                                           : static_cast<double> (scAudio.getRenderedSamplePosition());
+        }
+        if (runtime.loopEpochSamples.size() != runtime.document.tracks.size())
+            runtime.loopEpochSamples = runtime.nextLoopStartExactSamples;
+        if (runtime.nextLoopCycles.size() != runtime.document.tracks.size())
+            runtime.nextLoopCycles.assign (runtime.document.tracks.size(), 0);
         if (runtime.nextLoopStartSamples.size() != runtime.document.tracks.size())
             runtime.nextLoopStartSamples.resize (runtime.document.tracks.size(), scAudio.getRenderedSamplePosition());
-
-        for (int trackIndex = 0; trackIndex < static_cast<int> (runtime.document.tracks.size()); ++trackIndex)
+        if (runtime.completedLoops.size() != runtime.document.tracks.size()) runtime.completedLoops.assign (runtime.document.tracks.size(), 0);
+        if (runtime.trackRunning.size() != runtime.document.tracks.size()) runtime.trackRunning.assign (runtime.document.tracks.size(), true);
+        if (runtime.lastProcessedBoundary.size() != runtime.document.tracks.size())
+            runtime.lastProcessedBoundary.assign (runtime.document.tracks.size(), std::numeric_limits<std::int64_t>::min());
+        int safety = 0;
+        while (++safety < 100000)
         {
+            auto boundaryExact = std::numeric_limits<double>::max();
+            int trackIndex = -1;
+            for (int i = 0; i < static_cast<int> (runtime.nextLoopStartExactSamples.size()); ++i)
+                if (runtime.trackRunning[static_cast<size_t> (i)]
+                    && runtime.nextLoopStartExactSamples[static_cast<size_t> (i)] < boundaryExact)
+                {
+                    boundaryExact = runtime.nextLoopStartExactSamples[static_cast<size_t> (i)];
+                    trackIndex = i;
+                }
+            if (boundaryExact >= static_cast<double> (horizonSample)) break;
+            if (trackIndex < 0) break;
+            const auto boundary = static_cast<std::int64_t> (std::llround (boundaryExact));
             const auto& track = runtime.document.tracks[static_cast<size_t> (trackIndex)];
-            const auto loopSamples = juce::jmax<std::int64_t> (1, static_cast<std::int64_t> (
-                std::llround (runtime.document.loopDurationSeconds (track) * sampleRate)));
-            auto& loopStart = runtime.nextLoopStartSamples[static_cast<size_t> (trackIndex)];
-            while (loopStart < horizonSample)
+            const auto loopSamples = juce::jmax (1.0, runtime.document.loopDurationSeconds (track) * sampleRate);
+            auto& loopStartExact = runtime.nextLoopStartExactSamples[static_cast<size_t> (trackIndex)];
+            if (runtime.completedLoops[static_cast<size_t> (trackIndex)] > 0
+                && juce::isPositiveAndBelow (track.relationshipTarget, static_cast<int> (runtime.document.tracks.size()))
+                && track.relationshipTarget != trackIndex)
             {
-                if (! track.muted)
+                const auto target = static_cast<size_t> (track.relationshipTarget);
+                if (track.relationshipAction == OrbitsTrack::RelationshipAction::reset
+                    || track.relationshipAction == OrbitsTrack::RelationshipAction::phaseLock)
+                {
+                    runtime.trackRunning[target] = true;
+                    if (runtime.lastProcessedBoundary[target] != boundary)
+                    {
+                        runtime.loopEpochSamples[target] = boundaryExact;
+                        runtime.nextLoopCycles[target] = 0;
+                        runtime.nextLoopStartExactSamples[target] = boundaryExact;
+                        runtime.nextLoopStartSamples[target] = boundary;
+                    }
+                }
+                else if (track.relationshipAction == OrbitsTrack::RelationshipAction::start)
+                {
+                    runtime.trackRunning[target] = true;
+                    if (runtime.lastProcessedBoundary[target] != boundary)
+                    {
+                        runtime.loopEpochSamples[target] = boundaryExact;
+                        runtime.nextLoopCycles[target] = 0;
+                        runtime.nextLoopStartExactSamples[target] = boundaryExact;
+                        runtime.nextLoopStartSamples[target] = boundary;
+                    }
+                }
+                else if (track.relationshipAction == OrbitsTrack::RelationshipAction::stop)
+                    runtime.trackRunning[target] = false;
+            }
+            if (! track.muted && (! anySolo || track.solo))
                     for (const auto& line : track.lines)
                     {
                         const auto sourceIsEmpty = line.sound.playback == OrbitsLane::PlaybackType::pureData
@@ -13243,16 +13468,24 @@ private:
                                 trigger.scCode = line.sound.scCode;
                                 trigger.scDurationSeconds = line.sound.durationSeconds;
                             }
-                            trigger.gain = line.sound.gain;
-                            trigger.pan = line.sound.pan;
-                            const auto eventSample = loopStart + static_cast<std::int64_t> (
-                                std::llround (phase * static_cast<double> (loopSamples)));
+                            trigger.gain = line.sound.gain * track.gain;
+                            trigger.pan = track.outputRoute == OrbitsTrack::OutputRoute::left ? -1.0f
+                                        : track.outputRoute == OrbitsTrack::OutputRoute::right ? 1.0f
+                                        : juce::jlimit (-1.0f, 1.0f, line.sound.pan + track.pan);
+                            const auto eventSample = static_cast<std::int64_t> (
+                                std::llround (loopStartExact + phase * loopSamples));
                             if (eventSample >= scAudio.getRenderedSamplePosition())
                                 scAudio.scheduleTriggerManyAtSample ({ trigger }, scAudio.alignedEventSample (eventSample));
                         }
                     }
-                loopStart += loopSamples;
-            }
+            ++runtime.nextLoopCycles[static_cast<size_t> (trackIndex)];
+            loopStartExact = samplePositionForLoopCycle (
+                runtime.loopEpochSamples[static_cast<size_t> (trackIndex)],
+                runtime.nextLoopCycles[static_cast<size_t> (trackIndex)], loopSamples);
+            runtime.nextLoopStartSamples[static_cast<size_t> (trackIndex)] = static_cast<std::int64_t> (
+                std::llround (loopStartExact));
+            runtime.lastProcessedBoundary[static_cast<size_t> (trackIndex)] = boundary;
+            ++runtime.completedLoops[static_cast<size_t> (trackIndex)];
         }
     }
 
@@ -13268,18 +13501,26 @@ private:
         runtime.document = source;
         runtime.document.projectTempoBpm = globalTempoBpm;
         runtime.document.refreshTriggerPhases();
+        runtime.loopEpochSamples.resize (runtime.document.tracks.size(), static_cast<double> (dueSample));
+        runtime.nextLoopCycles.assign (runtime.document.tracks.size(), 0);
+        runtime.nextLoopStartExactSamples.resize (runtime.document.tracks.size(), static_cast<double> (dueSample));
         runtime.nextLoopStartSamples.resize (runtime.document.tracks.size(), dueSample);
+        runtime.completedLoops.assign (runtime.document.tracks.size(), 0);
+        runtime.trackRunning.assign (runtime.document.tracks.size(), true);
+        runtime.lastProcessedBoundary.assign (runtime.document.tracks.size(), std::numeric_limits<std::int64_t>::min());
         const auto sampleRate = juce::jmax (1.0, scAudio.getSampleRate());
         for (size_t i = 0; i < runtime.document.tracks.size(); ++i)
         {
             const auto& track = runtime.document.tracks[i];
             if (track.resetPhaseOnStart) continue;
-            const auto loopSamples = juce::jmax<std::int64_t> (1, static_cast<std::int64_t> (
-                std::llround (runtime.document.loopDurationSeconds (track) * sampleRate)));
-            runtime.nextLoopStartSamples[i] = dueSample - (dueSample % loopSamples);
+            const auto loopSamples = juce::jmax (1.0, runtime.document.loopDurationSeconds (track) * sampleRate);
+            runtime.nextLoopStartExactSamples[i] = std::floor (static_cast<double> (dueSample) / loopSamples) * loopSamples;
+            runtime.loopEpochSamples[i] = runtime.nextLoopStartExactSamples[i];
+            runtime.nextLoopStartSamples[i] = static_cast<std::int64_t> (
+                std::llround (runtime.nextLoopStartExactSamples[i]));
         }
         orbitsRuntimes.push_back (std::move (runtime));
-        scheduleOrbitsUntil (orbitsRuntimes.back(), dueSample + static_cast<std::int64_t> (std::llround (scAudio.getSampleRate() * 2.0)));
+        scheduleOrbitsUntil (orbitsRuntimes.back(), dueSample + static_cast<std::int64_t> (std::llround (scAudio.getSampleRate() * 0.25)));
         return std::numeric_limits<double>::infinity();
     }
 
@@ -13300,6 +13541,7 @@ private:
         carouselRuntimes.clear();
         pipeRuntimes.clear();
         orbitsRuntimes.clear();
+        pendingVisualRuntimeStarts.clear();
         activeDiscs.clear();
         pendingElementChains.clear();
         if (preserveTails)
@@ -14756,38 +14998,26 @@ private:
         for (size_t i = 0; i < triggers.size(); ++i)
             if (shouldFire[i]) selectedTriggers.push_back (triggers[i]);
         scAudio.scheduleTriggerManyAtSample (selectedTriggers, dueSample);
-        carouselRuntimes.clear();
+        std::vector<CarouselDocument> selectedCarousels;
         for (size_t i = 0; i < carouselDocuments.size(); ++i)
         {
             if (! shouldFire[triggers.size() + i]) continue;
-            auto runtime = std::make_unique<CarouselEditorComponent>();
-            runtime->setSampleClock ([this]
-            {
-                return static_cast<double> (scAudio.getRenderedSamplePosition()) / juce::jmax (1.0, scAudio.getSampleRate());
-            });
-            runtime->setDocument (carouselDocuments[i]);
-            runtime->onTone = [this] (const CarouselDocument::Item& tone) { triggerCarouselTone (scAudio, tone); };
-            runtime->setRunning (true);
-            carouselRuntimes.push_back (std::move (runtime));
+            selectedCarousels.push_back (carouselDocuments[i]);
         }
-        if (carouselPanel != nullptr && ! carouselRuntimes.empty()) carouselPanel->start();
-        pipeRuntimes.clear();
+        std::vector<juce::String> selectedPipeStates;
         for (size_t i = 0; i < pipeStates.size(); ++i)
         {
             if (! shouldFire[triggers.size() + carouselDocuments.size() + i]) continue;
-            const auto& stateText = pipeStates[i];
-            auto runtime = otherware::createPipeWorkspaceComponent();
-            otherware::setPipeWorkspaceSampleClock (*runtime, [this]
-            {
-                return static_cast<double> (scAudio.getRenderedSamplePosition()) / juce::jmax (1.0, scAudio.getSampleRate());
-            });
-            otherware::setPipeWorkspaceDiscTriggerCallback (*runtime, [this] (const auto& disc) { triggerPipeWorldDisc (scAudio, disc); });
-            otherware::setPipeWorkspaceTempo (*runtime, globalTempoBpm);
-            if (stateText.isNotEmpty()) otherware::applyPipeWorkspaceState (*runtime, juce::JSON::parse (stateText));
-            otherware::setPipeWorkspaceRunning (*runtime, true);
-            pipeRuntimes.push_back (std::move (runtime));
+            selectedPipeStates.push_back (pipeStates[i]);
         }
-        if (pipeElementComponent != nullptr && ! pipeRuntimes.empty()) otherware::setPipeWorkspaceRunning (*pipeElementComponent, true);
+        const auto selectedVisualRuntime = ! selectedCarousels.empty() || ! selectedPipeStates.empty();
+        if (selectedVisualRuntime)
+        {
+            if (dueSample <= now)
+                startVisualRuntimes (selectedCarousels, selectedPipeStates);
+            else
+                pendingVisualRuntimeStarts.push_back ({ dueSample, std::move (selectedCarousels), std::move (selectedPipeStates) });
+        }
         auto orbitsDuration = 0.0;
         auto orbitsIndefinite = false;
         for (size_t i = 0; i < orbitsDocuments.size(); ++i)
@@ -14824,7 +15054,7 @@ private:
         }
 
         auto durationSeconds = 0.45;
-        auto indefinite = ! carouselRuntimes.empty() || ! pipeRuntimes.empty() || orbitsIndefinite;
+        auto indefinite = selectedVisualRuntime || orbitsIndefinite;
         durationSeconds = juce::jmax (durationSeconds, orbitsDuration);
         for (const auto& trigger : selectedTriggers)
         {
@@ -14900,15 +15130,55 @@ private:
         const auto newTempo = juce::jlimit (20.0, 400.0, enteredTempo > 0.0 ? enteredTempo : globalTempoBpm);
         tempoEditor.setText (juce::String (newTempo, newTempo == std::round (newTempo) ? 0 : 1), false);
         if (std::abs (newTempo - globalTempoBpm) < 0.001) return;
-        globalTempoBpm = newTempo;
+        setGlobalTempoPreservingTransportBeat (newTempo);
         canvas.setFlowTiming (globalTempoBpm, beatsForGridChoice (gridUnitChoice));
-        scAudio.setTempo (globalTempoBpm);
         markProjectDirty();
+    }
+
+    void setGlobalTempoPreservingTransportBeat (double newTempo)
+    {
+        const auto now = scAudio.getRenderedSamplePosition();
+        const auto sampleRate = juce::jmax (1.0, scAudio.getSampleRate());
+        const auto safeTempo = juce::jlimit (20.0, 400.0, newTempo);
+        transportBeatAtAnchor = currentTransportBeat();
+        transportBeatAnchorSample = now;
+
+        for (auto& runtime : orbitsRuntimes)
+        {
+            std::vector<double> remainingLoopFractions (runtime.document.tracks.size(), 1.0);
+            for (size_t i = 0; i < runtime.document.tracks.size() && i < runtime.nextLoopStartExactSamples.size(); ++i)
+            {
+                const auto& track = runtime.document.tracks[i];
+                if (track.clockMode == OrbitsTrack::ClockMode::free) continue;
+                const auto oldLoopSamples = juce::jmax (1.0, runtime.document.loopDurationSeconds (track) * sampleRate);
+                remainingLoopFractions[i] = juce::jlimit (
+                    0.0, 1.0, (runtime.nextLoopStartExactSamples[i] - static_cast<double> (now)) / oldLoopSamples);
+            }
+
+            runtime.document.projectTempoBpm = safeTempo;
+            for (size_t i = 0; i < runtime.document.tracks.size() && i < runtime.nextLoopStartExactSamples.size(); ++i)
+            {
+                const auto& track = runtime.document.tracks[i];
+                if (track.clockMode == OrbitsTrack::ClockMode::free) continue;
+                const auto newLoopSamples = juce::jmax (1.0, runtime.document.loopDurationSeconds (track) * sampleRate);
+                runtime.nextLoopStartExactSamples[i] = static_cast<double> (now)
+                                                       + remainingLoopFractions[i] * newLoopSamples;
+                runtime.loopEpochSamples[i] = runtime.nextLoopStartExactSamples[i];
+                runtime.nextLoopCycles[i] = 0;
+                runtime.nextLoopStartSamples[i] = static_cast<std::int64_t> (
+                    std::llround (runtime.nextLoopStartExactSamples[i]));
+            }
+        }
+
+        globalTempoBpm = safeTempo;
+        scAudio.setTempo (globalTempoBpm);
+        for (auto& runtime : pipeRuntimes)
+            otherware::setPipeWorkspaceTempo (*runtime, globalTempoBpm);
     }
 
     void applyGlobalTiming (const juce::ValueTree& project)
     {
-        globalTempoBpm = juce::jlimit (20.0, 400.0, static_cast<double> (project.getProperty ("globalTempo", 120.0)));
+        setGlobalTempoPreservingTransportBeat (static_cast<double> (project.getProperty ("globalTempo", 120.0)));
         gridUnitChoice = juce::jlimit (1, 8, static_cast<int> (project.getProperty ("gridUnit", 5)));
         triggerQuantizeChoice = juce::jlimit (0, 5, static_cast<int> (project.getProperty ("triggerQuantize", 0)));
         applyUiTheme (static_cast<bool> (project.getProperty ("rainbowUi", false)));
@@ -14916,7 +15186,6 @@ private:
         gridUnitBox.setSelectedId (gridUnitChoice, juce::dontSendNotification);
         triggerQuantizeSlider.setValue (triggerQuantizeChoice, juce::dontSendNotification);
         canvas.setFlowTiming (globalTempoBpm, beatsForGridChoice (gridUnitChoice));
-        scAudio.setTempo (globalTempoBpm);
         masterGain.store (juce::jlimit (0.0f, 1.5f, static_cast<float> (project.getProperty ("masterGain", 1.0f))));
         masterVolumeSlider.setValue (masterGain.load(), juce::dontSendNotification);
         masterVolumeSlider.setTooltip ("Master volume: " + juce::String (juce::roundToInt (masterGain.load() * 100.0f)) + "%");
@@ -15120,7 +15389,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.7.11"; }
+    const juce::String getApplicationVersion() override    { return "0.7.14"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String& commandLine) override
@@ -15261,7 +15530,30 @@ int main (int argc, char** argv)
         return 3;
     }
 
+    {
+        constexpr long double rate = 44100.0L;
+        constexpr long double tempo = 137.0L;
+        constexpr long double loopBeats = 7.0L / 4.0L;
+        constexpr std::int64_t cycles = 1000000;
+        constexpr double epoch = 123.375;
+        const auto loopSamples = static_cast<double> (rate * 60.0L / tempo * loopBeats);
+        const auto scheduled = samplePositionForLoopCycle (epoch, cycles, loopSamples);
+        const auto reference = static_cast<long double> (epoch)
+                             + static_cast<long double> (cycles) * rate * 60.0L / tempo * loopBeats;
+        if (std::abs (static_cast<long double> (scheduled) - reference) > 0.25L)
+        {
+            std::fprintf (stderr, "Playback smoke: fractional Orbits clock drifted over a long session\n");
+            return 14;
+        }
+    }
+
     auto orbitsBefore = OrbitsDocument::createDefault();
+    orbitsBefore.tracks[0].relationshipAction = OrbitsTrack::RelationshipAction::phaseLock;
+    orbitsBefore.tracks[0].relationshipTarget = 1;
+    orbitsBefore.tracks[0].gain = 0.73f;
+    orbitsBefore.tracks[0].pan = -0.25f;
+    orbitsBefore.tracks[0].solo = true;
+    orbitsBefore.tracks[0].outputRoute = OrbitsTrack::OutputRoute::left;
     OrbitsTriggerLine smokeLine;
     smokeLine.id = "smoke-line";
     smokeLine.start = { 0.0f, 0.5f };
@@ -15286,6 +15578,12 @@ int main (int argc, char** argv)
     const auto orbitsAfter = OrbitsDocument::fromValueTree (orbitsBefore.toValueTree());
     if (orbitsAfter.tracks.size() != orbitsBefore.tracks.size()
         || orbitsAfter.tracks.empty()
+        || orbitsAfter.tracks[0].relationshipAction != OrbitsTrack::RelationshipAction::phaseLock
+        || orbitsAfter.tracks[0].relationshipTarget != 1
+        || std::abs (orbitsAfter.tracks[0].gain - 0.73f) > 0.001f
+        || std::abs (orbitsAfter.tracks[0].pan + 0.25f) > 0.001f
+        || ! orbitsAfter.tracks[0].solo
+        || orbitsAfter.tracks[0].outputRoute != OrbitsTrack::OutputRoute::left
         || orbitsAfter.tracks.front().lines.size() != 1
         || orbitsAfter.tracks.front().lines.front().sound.scCode.isEmpty()
         || orbitsAfter.tracks.front().lines.front().sound.pdPatch.isEmpty()

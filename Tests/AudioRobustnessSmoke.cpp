@@ -79,22 +79,27 @@ int main()
     engine.prepare (48000.0, 512, 2, 0);
     if (! engine.isReady()) return 8;
     engine.setTempo (120.0);
+    if (engine.alignedEventSample (137) != 137)
+    {
+        std::cerr << "Audio events were moved away from their requested sample\n";
+        return 9;
+    }
     juce::AudioBuffer<float> scheduledOutput (2, 100);
     DiscAudioTrigger scheduledTone;
     scheduledTone.soundElementCount = 1;
-    const auto dueSample = engine.alignedEventSample (128);
+    const auto dueSample = engine.alignedEventSample (137);
     engine.scheduleTriggerManyAtSample ({ scheduledTone }, dueSample);
 
     engine.render (scheduledOutput);
     if (scheduledOutput.getMagnitude (0, scheduledOutput.getNumSamples()) > 0.00001f)
     {
         std::cerr << "Scheduled event sounded before its sample position\n";
-        return 9;
+        return 10;
     }
     if (engine.getRenderedSamplePosition() != 100)
     {
         std::cerr << "Audio sample clock drifted across a non-quantum block\n";
-        return 10;
+        return 11;
     }
 
     engine.suspendScheduledEvents();
@@ -102,7 +107,7 @@ int main()
     if (scheduledOutput.getMagnitude (0, scheduledOutput.getNumSamples()) > 0.00001f)
     {
         std::cerr << "Suspended event sounded while transport was paused\n";
-        return 11;
+        return 12;
     }
     engine.render (scheduledOutput);
     if (scheduledOutput.getMagnitude (0, scheduledOutput.getNumSamples()) > 0.00001f)
@@ -113,13 +118,13 @@ int main()
     engine.resumeScheduledEvents();
 
     engine.render (scheduledOutput);
-    if (scheduledOutput.getMagnitude (0, 84) > 0.00001f)
+    if (scheduledOutput.getMagnitude (0, 37) > 0.00001f)
     {
         std::cerr << "Resumed event crossed its shifted in-buffer boundary\n";
         return 13;
     }
 
-    auto scheduledPeak = scheduledOutput.getMagnitude (0, 84, scheduledOutput.getNumSamples() - 84);
+    auto scheduledPeak = scheduledOutput.getMagnitude (0, 37, scheduledOutput.getNumSamples() - 37);
     for (int block = 0; block < 8; ++block)
     {
         engine.render (scheduledOutput);

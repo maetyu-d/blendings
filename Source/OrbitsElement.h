@@ -36,6 +36,8 @@ struct OrbitsTriggerLine
 struct OrbitsTrack
 {
     enum class ClockMode { free = 0, project, ratio };
+    enum class RelationshipAction { none = 0, reset, start, stop, phaseLock };
+    enum class OutputRoute { stereo = 0, left, right };
 
     juce::String name { "Track 1" };
     int colourIndex = 0;
@@ -53,9 +55,15 @@ struct OrbitsTrack
     double yOffset = 0.0;
     bool hidden = false;
     bool muted = false;
+    bool solo = false;
+    float gain = 1.0f;
+    float pan = 0.0f;
+    OutputRoute outputRoute = OutputRoute::stereo;
     ClockMode clockMode = ClockMode::free;
     double tempoRatio = 1.0;
     bool resetPhaseOnStart = true;
+    RelationshipAction relationshipAction = RelationshipAction::none;
+    int relationshipTarget = -1;
     std::vector<OrbitsTriggerLine> lines;
 };
 
@@ -78,7 +86,8 @@ struct OrbitsDocument
 };
 
 class OrbitsEditorComponent final : public juce::Component,
-                                    private juce::Timer
+                                    private juce::Timer,
+                                    private juce::ListBoxModel
 {
 public:
     using Commit = std::function<void (const OrbitsDocument&)>;
@@ -113,10 +122,13 @@ private:
     juce::TextButton deleteLineButton { "Delete line" };
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
     juce::TextButton trackTabButton { "Track" }, shapeTabButton { "Shape" }, soundTabButton { "Sound" };
-    juce::ComboBox trackBox;
-    juce::ComboBox clockModeBox, snapDivisionBox, playbackBox, lineColourBox;
+    juce::TextButton distributeButton { "Distribute" }, rotateButton { "Rotate" }, repeatButton { "Repeat" };
+    juce::TextButton reverseButton { "Reverse" }, randomiseButton { "Randomise" }, euclideanButton { "Euclidean fill" };
+    juce::ListBox trackList { "Orbits tracks", this };
+    juce::ComboBox clockModeBox, relationshipActionBox, relationshipTargetBox, outputRouteBox, snapDivisionBox, playbackBox, lineColourBox;
     juce::ToggleButton hideButton { "Hide track" };
     juce::ToggleButton muteButton { "Mute track" };
+    juce::ToggleButton soloButton { "Solo track" };
     juce::ToggleButton resetPhaseButton { "Reset phase on start" };
     juce::ToggleButton snapButton { "Snap sound lines" };
     juce::ToggleButton lineEnabledButton { "Enabled" };
@@ -126,12 +138,14 @@ private:
     juce::Label numeratorLabel, denominatorLabel;
     juce::Label thicknessLabel, warpLabel, twistLabel, phaseLabel;
     juce::Label xRotationLabel, yRotationLabel, xOffsetLabel, yOffsetLabel;
-    juce::Label clockModeLabel, ratioLabel, snapLabel;
+    juce::Label clockModeLabel, ratioLabel, mixLabel, trackGainLabel, trackPanLabel, outputRouteLabel;
+    juce::Label relationshipLabel, relationshipTargetLabel, snapLabel, patternLabel, patternStepsLabel, patternPulsesLabel;
     juce::Label lineNameLabel, playbackLabel, lineColourLabel, durationLabel, probabilityLabel, gainLabel, panLabel;
     juce::Slider bpmSlider, numeratorSlider, denominatorSlider, barsSlider;
     juce::Slider thicknessSlider, warpSlider, twistSlider, phaseSlider;
     juce::Slider xRotationSlider, yRotationSlider, xOffsetSlider, yOffsetSlider;
-    juce::Slider ratioSlider, durationSlider, probabilitySlider, gainSlider, panSlider;
+    juce::Slider ratioSlider, trackGainSlider, trackPanSlider, patternStepsSlider, patternPulsesSlider;
+    juce::Slider durationSlider, probabilitySlider, gainSlider, panSlider;
 
     int selectedTrack = 0;
     int selectedLine = -1;
@@ -140,6 +154,8 @@ private:
     double previewSeconds = 0.0;
     double lastPreviewTime = 0.0;
     std::vector<double> previewPhases;
+    std::vector<double> previewTrackPositions;
+    std::vector<bool> previewTrackRunning;
     std::map<juce::String, std::pair<bool, double>> triggerFeedback;
     std::vector<OrbitsDocument> undoHistory, redoHistory;
     bool restoringHistory = false;
@@ -162,6 +178,10 @@ private:
     void restoreHistory (const OrbitsDocument&);
     void addTrack();
     void removeTrack();
+    void applyPattern (int operation);
+    int getNumRows() override;
+    void paintListBoxItem (int, juce::Graphics&, int, int, bool) override;
+    void selectedRowsChanged (int) override;
     void timerCallback() override;
 };
 }

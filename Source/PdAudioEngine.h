@@ -42,6 +42,7 @@ public:
     void stopAllPatches();
 
     [[nodiscard]] bool isReady() const noexcept { return ready; }
+    [[nodiscard]] int getDspBlockSize() const noexcept { return dspBlockSize; }
     [[nodiscard]] juce::String getStatusText() const;
 
 private:
@@ -59,6 +60,7 @@ private:
     int currentOutputChannels = 2;
     int currentInputChannels = 0;
     int maximumBlockSize = 512;
+    int dspBlockSize = 64;
     int nextPatchId = 1;
     std::int64_t renderedSamples = 0;
     std::int64_t lastAudibleSample = 0;

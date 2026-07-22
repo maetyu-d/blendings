@@ -361,6 +361,7 @@ bool PdAudioEngine::prepare (double sampleRate, int maxBlockSize, int outputChan
     libpd_finish_message ("pd", "dsp");
 
     const auto blockSize = juce::jmax (1, libpd_blocksize());
+    dspBlockSize = blockSize;
     const auto ticks = juce::jmax (1, (maximumBlockSize + blockSize - 1) / blockSize);
     pdOutput.resize (static_cast<size_t> (ticks * blockSize * currentOutputChannels), 0.0f);
 

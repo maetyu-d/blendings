@@ -518,7 +518,7 @@ void ScDiscAudioEngine::scheduleTriggerManyAtSample (const std::vector<DiscAudio
                 if (pdAudio.preparePatch (triggerToPlay.pdPatch, triggerToPlay.pdSearchPath))
                 {
                     const juce::ScopedLock lock (scheduledEventLock);
-                    scheduledPdTriggers.push_back ({ eventSample, triggerToPlay.pdPatch, triggerToPlay.pdSearchPath,
+                    scheduledPdTriggers.push_back ({ alignedPdEventSample (eventSample), triggerToPlay.pdPatch, triggerToPlay.pdSearchPath,
                                                      triggerToPlay.pdDurationSeconds,
                                                      static_cast<float> (triggerToPlay.midiNote) });
                 }
@@ -642,9 +642,18 @@ void ScDiscAudioEngine::setTempo (double bpm) noexcept
 
 std::int64_t ScDiscAudioEngine::alignedEventSample (std::int64_t sample) const noexcept
 {
-    constexpr std::int64_t renderQuantum = 64;
+    // render() splits the current audio block at every event boundary, so events
+    // can be dispatched at their exact requested sample rather than a render quantum.
+    return juce::jmax<std::int64_t> (0, sample);
+}
+
+std::int64_t ScDiscAudioEngine::alignedPdEventSample (std::int64_t sample) const noexcept
+{
+    // libpd's DSP graph advances in fixed DSP blocks. Keeping Pd messages on the
+    // runtime-reported block clock avoids already-rendered Pd audio before a bang.
+    const auto pdBlockSize = static_cast<std::int64_t> (juce::jmax (1, pdAudio.getDspBlockSize()));
     const auto safeSample = juce::jmax<std::int64_t> (0, sample);
-    return ((safeSample + renderQuantum - 1) / renderQuantum) * renderQuantum;
+    return ((safeSample + pdBlockSize - 1) / pdBlockSize) * pdBlockSize;
 }
 
 void ScDiscAudioEngine::suspendScheduledEvents()
@@ -681,7 +690,7 @@ void ScDiscAudioEngine::resumeScheduledEvents()
 
     for (auto& trigger : suspendedPdTriggers)
     {
-        trigger.dueSample = alignedEventSample (now + trigger.dueSample);
+        trigger.dueSample = alignedPdEventSample (now + trigger.dueSample);
         scheduledPdTriggers.push_back (std::move (trigger));
     }
 

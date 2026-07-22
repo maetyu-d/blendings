@@ -69,12 +69,12 @@ SpiralGeometry geometryForTrack (const OrbitsTrack& track)
     return geometry;
 }
 
-juce::Point<float> spiralPoint (const OrbitsTrack& track, double phase)
+juce::Point<float> spiralBodyPoint (const OrbitsTrack& track, double phase)
 {
     const auto geometry = geometryForTrack (track);
-    const auto wrapped = phase - std::floor (phase);
-    const auto shaped = std::pow (static_cast<float> (wrapped), geometry.exponent);
-    const auto anglePhase = wrapped + track.phaseOffsetDegrees / 360.0;
+    const auto bodyPhase = juce::jlimit (0.0, 1.0, phase);
+    const auto shaped = std::pow (static_cast<float> (bodyPhase), geometry.exponent);
+    const auto anglePhase = bodyPhase + track.phaseOffsetDegrees / 360.0;
     const auto theta = anglePhase * geometry.turns * twoPi;
     const auto innerRadius = geometry.outerRadius * geometry.innerScale;
     const auto radiusBase = innerRadius + shaped * (geometry.outerRadius - innerRadius);
@@ -91,6 +91,25 @@ juce::Point<float> spiralPoint (const OrbitsTrack& track, double phase)
     y *= 1.0 - 0.22 * std::abs (bend) * xNorm * xNorm;
     return { static_cast<float> (0.5 + track.xOffset + x),
              static_cast<float> (0.5 + track.yOffset + y) };
+}
+
+juce::Point<float> spiralPoint (const OrbitsTrack& track, double phase)
+{
+    const auto wrapped = phase - std::floor (phase);
+    const auto geometry = geometryForTrack (track);
+    const auto start = spiralBodyPoint (track, 0.0);
+    const auto end = spiralBodyPoint (track, 1.0);
+    const auto closingLength = start.getDistanceFrom (end);
+    const auto innerRadius = geometry.outerRadius * geometry.innerScale;
+    const auto estimatedSpiralLength = juce::MathConstants<float>::pi * static_cast<float> (geometry.turns)
+                                     * (geometry.outerRadius + innerRadius);
+    const auto closingShare = juce::jlimit (0.01, 0.25,
+        static_cast<double> (closingLength / juce::jmax (0.0001f, estimatedSpiralLength + closingLength)));
+    const auto spiralShare = 1.0 - closingShare;
+    if (wrapped <= spiralShare)
+        return spiralBodyPoint (track, wrapped / spiralShare);
+
+    return end + (start - end) * static_cast<float> ((wrapped - spiralShare) / closingShare);
 }
 
 }
@@ -119,7 +138,7 @@ OrbitsDocument OrbitsDocument::createDefault()
 juce::ValueTree OrbitsDocument::toValueTree() const
 {
     juce::ValueTree root ("orbits");
-    root.setProperty ("version", 3, nullptr);
+    root.setProperty ("version", 4, nullptr);
     root.setProperty ("projectTempo", projectTempoBpm, nullptr);
     root.setProperty ("snap", snapToMusicalGrid, nullptr);
     root.setProperty ("snapDivisions", snapDivisionsPerBeat, nullptr);
@@ -142,9 +161,15 @@ juce::ValueTree OrbitsDocument::toValueTree() const
         node.setProperty ("yOffset", track.yOffset, nullptr);
         node.setProperty ("hidden", track.hidden, nullptr);
         node.setProperty ("muted", track.muted, nullptr);
+        node.setProperty ("solo", track.solo, nullptr);
+        node.setProperty ("gain", track.gain, nullptr);
+        node.setProperty ("pan", track.pan, nullptr);
+        node.setProperty ("outputRoute", static_cast<int> (track.outputRoute), nullptr);
         node.setProperty ("clockMode", static_cast<int> (track.clockMode), nullptr);
         node.setProperty ("tempoRatio", track.tempoRatio, nullptr);
         node.setProperty ("resetPhase", track.resetPhaseOnStart, nullptr);
+        node.setProperty ("relationshipAction", static_cast<int> (track.relationshipAction), nullptr);
+        node.setProperty ("relationshipTarget", track.relationshipTarget, nullptr);
         for (const auto& line : track.lines)
         {
             juce::ValueTree lineNode ("line");
@@ -197,9 +222,16 @@ OrbitsDocument OrbitsDocument::fromValueTree (const juce::ValueTree& root)
         track.yOffset = juce::jlimit (-0.5, 0.5, static_cast<double> (child.getProperty ("yOffset", 0.0)));
         track.hidden = static_cast<bool> (child.getProperty ("hidden", false));
         track.muted = static_cast<bool> (child.getProperty ("muted", false));
+        track.solo = static_cast<bool> (child.getProperty ("solo", false));
+        track.gain = juce::jlimit (0.0f, 1.5f, static_cast<float> (child.getProperty ("gain", 1.0f)));
+        track.pan = juce::jlimit (-1.0f, 1.0f, static_cast<float> (child.getProperty ("pan", 0.0f)));
+        track.outputRoute = static_cast<OrbitsTrack::OutputRoute> (juce::jlimit (0, 2, static_cast<int> (child.getProperty ("outputRoute", 0))));
         track.clockMode = static_cast<OrbitsTrack::ClockMode> (juce::jlimit (0, 2, static_cast<int> (child.getProperty ("clockMode", 0))));
         track.tempoRatio = juce::jlimit (0.125, 8.0, static_cast<double> (child.getProperty ("tempoRatio", 1.0)));
         track.resetPhaseOnStart = static_cast<bool> (child.getProperty ("resetPhase", true));
+        track.relationshipAction = static_cast<OrbitsTrack::RelationshipAction> (
+            juce::jlimit (0, 4, static_cast<int> (child.getProperty ("relationshipAction", 0))));
+        track.relationshipTarget = static_cast<int> (child.getProperty ("relationshipTarget", -1));
         for (const auto& lineNode : child)
         {
             if (! lineNode.hasType ("line")) continue;
@@ -224,6 +256,16 @@ OrbitsDocument OrbitsDocument::fromValueTree (const juce::ValueTree& root)
         document.tracks.push_back (std::move (track));
     }
     if (document.tracks.empty()) return createDefault();
+    for (int i = 0; i < static_cast<int> (document.tracks.size()); ++i)
+    {
+        auto& track = document.tracks[static_cast<size_t> (i)];
+        if (! juce::isPositiveAndBelow (track.relationshipTarget, static_cast<int> (document.tracks.size()))
+            || track.relationshipTarget == i)
+        {
+            track.relationshipTarget = -1;
+            track.relationshipAction = OrbitsTrack::RelationshipAction::none;
+        }
+    }
     document.refreshTriggerPhases();
     return document;
 }
@@ -418,7 +460,7 @@ public:
         grabKeyboardFocus();
         if (document == nullptr || selectedTrack == nullptr || selectedLine == nullptr || document->tracks.empty()) return;
         const auto point = fromScreen (event.position);
-        if (event.mods.isMiddleButtonDown() || event.mods.isAltDown())
+        if (event.mods.isMiddleButtonDown() || event.mods.isCommandDown())
         {
             panning = true; lastMouse = event.position; return;
         }
@@ -432,6 +474,20 @@ public:
         for (int i = static_cast<int> (currentTrack.lines.size()); --i >= 0;)
         {
             auto& candidate = currentTrack.lines[static_cast<size_t> (i)];
+            const auto hitsLine = candidate.start.getDistanceFrom (point) <= tolerance
+                               || candidate.end.getDistanceFrom (point) <= tolerance
+                               || juce::Line<float> (candidate.start, candidate.end).findNearestPointTo (point).getDistanceFrom (point) <= tolerance;
+            if (event.mods.isAltDown() && hitsLine)
+            {
+                if (onBeginEdit) onBeginEdit();
+                auto duplicate = candidate;
+                duplicate.id = juce::Uuid().toString();
+                duplicate.sound.name = candidate.sound.name + " copy";
+                currentTrack.lines.push_back (std::move (duplicate));
+                *selectedLine = static_cast<int> (currentTrack.lines.size()) - 1;
+                dragMode = 1; lastWorld = point; editCheckpointStarted = true;
+                document->refreshTriggerPhases(); selectionChanged(); repaint(); return;
+            }
             if (candidate.start.getDistanceFrom (point) <= tolerance) { *selectedLine = i; dragMode = 2; lastWorld = point; selectionChanged(); return; }
             if (candidate.end.getDistanceFrom (point) <= tolerance) { *selectedLine = i; dragMode = 3; lastWorld = point; selectionChanged(); return; }
             if (juce::Line<float> (candidate.start, candidate.end).findNearestPointTo (point).getDistanceFrom (point) <= tolerance)
@@ -609,6 +665,8 @@ void OrbitsEditorComponent::configureSlider (juce::Slider& slider, double minimu
             current->xOffset = xOffsetSlider.getValue();
             current->yOffset = yOffsetSlider.getValue();
             current->tempoRatio = ratioSlider.getValue();
+            current->gain = static_cast<float> (trackGainSlider.getValue());
+            current->pan = static_cast<float> (trackPanSlider.getValue());
             if (auto* selected = line())
             {
                 selected->sound.durationSeconds = static_cast<float> (durationSlider.getValue());
@@ -628,7 +686,7 @@ void OrbitsEditorComponent::configure()
     inspectorViewport.setViewedComponent (&inspectorContent, false);
     inspectorViewport.setScrollBarsShown (true, false);
     inspectorViewport.setScrollBarThickness (7);
-    inspectorViewport.setColour (juce::ScrollBar::thumbColourId, juce::Colours::white.withAlpha (0.20f));
+    inspectorViewport.setColour (juce::ScrollBar::thumbColourId, juce::Colour (0xff2997ff).withAlpha (0.72f));
     canvas->document = &document;
     canvas->selectedTrack = &selectedTrack;
     canvas->selectedLine = &selectedLine;
@@ -651,16 +709,22 @@ void OrbitsEditorComponent::configure()
     };
 
     for (auto* button : { &addTrackButton, &removeTrackButton, &playButton, &stopButton, &undoButton, &redoButton }) addAndMakeVisible (*button);
-    for (auto* button : { &editSoundButton, &auditionButton, &deleteLineButton }) inspectorContent.addAndMakeVisible (*button);
-    for (auto* button : { &trackTabButton, &shapeTabButton, &soundTabButton }) inspectorContent.addAndMakeVisible (*button);
-    inspectorContent.addAndMakeVisible (trackBox);
-    for (auto* combo : { &clockModeBox, &snapDivisionBox, &playbackBox, &lineColourBox }) inspectorContent.addAndMakeVisible (*combo);
+    for (auto* button : { &editSoundButton, &auditionButton, &deleteLineButton, &distributeButton, &rotateButton, &repeatButton,
+                          &reverseButton, &randomiseButton, &euclideanButton }) inspectorContent.addAndMakeVisible (*button);
+    for (auto* button : { &trackTabButton, &shapeTabButton, &soundTabButton }) addAndMakeVisible (*button);
+    inspectorContent.addAndMakeVisible (trackList);
+    trackList.setRowHeight (36);
+    trackList.setColour (juce::ListBox::backgroundColourId, juce::Colour (0xff111916));
+    trackList.setColour (juce::ListBox::outlineColourId, juce::Colour (0xff2a3a34));
+    trackList.setOutlineThickness (1);
+    for (auto* combo : { &clockModeBox, &relationshipActionBox, &relationshipTargetBox, &outputRouteBox, &snapDivisionBox, &playbackBox, &lineColourBox }) inspectorContent.addAndMakeVisible (*combo);
     inspectorContent.addAndMakeVisible (lineNameEditor);
-    for (auto* toggle : { &hideButton, &muteButton, &resetPhaseButton, &snapButton, &lineEnabledButton }) inspectorContent.addAndMakeVisible (*toggle);
+    for (auto* toggle : { &hideButton, &muteButton, &soloButton, &resetPhaseButton, &snapButton, &lineEnabledButton }) inspectorContent.addAndMakeVisible (*toggle);
     for (auto* label : { &trackLabel, &bpmLabel, &meterLabel, &barsLabel, &shapeLabel, &soundLineLabel,
                          &numeratorLabel, &denominatorLabel, &thicknessLabel, &warpLabel,
                          &twistLabel, &phaseLabel, &xRotationLabel, &yRotationLabel,
-                         &xOffsetLabel, &yOffsetLabel, &clockModeLabel, &ratioLabel, &snapLabel,
+                         &xOffsetLabel, &yOffsetLabel, &clockModeLabel, &ratioLabel, &mixLabel, &trackGainLabel, &trackPanLabel, &outputRouteLabel,
+                         &relationshipLabel, &relationshipTargetLabel, &snapLabel, &patternLabel, &patternStepsLabel, &patternPulsesLabel,
                          &lineNameLabel, &playbackLabel, &lineColourLabel, &durationLabel, &probabilityLabel,
                          &gainLabel, &panLabel }) inspectorContent.addAndMakeVisible (*label);
     trackLabel.setText ("TRACK", juce::dontSendNotification);
@@ -681,7 +745,16 @@ void OrbitsEditorComponent::configure()
     yOffsetLabel.setText ("Y offset", juce::dontSendNotification);
     clockModeLabel.setText ("CLOCK", juce::dontSendNotification);
     ratioLabel.setText ("Tempo ratio", juce::dontSendNotification);
+    mixLabel.setText ("MIX", juce::dontSendNotification);
+    trackGainLabel.setText ("Gain", juce::dontSendNotification);
+    trackPanLabel.setText ("Pan", juce::dontSendNotification);
+    outputRouteLabel.setText ("Output", juce::dontSendNotification);
+    relationshipLabel.setText ("TRACK RELATIONSHIP", juce::dontSendNotification);
+    relationshipTargetLabel.setText ("Target", juce::dontSendNotification);
     snapLabel.setText ("SNAPPING", juce::dontSendNotification);
+    patternLabel.setText ("PATTERN TOOLS", juce::dontSendNotification);
+    patternStepsLabel.setText ("Steps", juce::dontSendNotification);
+    patternPulsesLabel.setText ("Pulses", juce::dontSendNotification);
     lineNameLabel.setText ("Name", juce::dontSendNotification);
     playbackLabel.setText ("Engine", juce::dontSendNotification);
     lineColourLabel.setText ("Colour", juce::dontSendNotification);
@@ -690,14 +763,16 @@ void OrbitsEditorComponent::configure()
     gainLabel.setText ("Gain", juce::dontSendNotification);
     panLabel.setText ("Pan", juce::dontSendNotification);
 
-    for (auto* label : { &trackLabel, &bpmLabel, &meterLabel, &barsLabel, &shapeLabel, &soundLineLabel, &clockModeLabel, &snapLabel })
+    for (auto* label : { &trackLabel, &bpmLabel, &meterLabel, &barsLabel, &shapeLabel, &soundLineLabel, &clockModeLabel,
+                         &mixLabel, &relationshipLabel, &snapLabel, &patternLabel })
     {
         label->setFont (juce::FontOptions (12.0f, juce::Font::bold));
         label->setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.62f));
     }
     for (auto* label : { &numeratorLabel, &denominatorLabel, &thicknessLabel, &warpLabel,
                          &twistLabel, &phaseLabel, &xRotationLabel, &yRotationLabel,
-                         &xOffsetLabel, &yOffsetLabel, &ratioLabel, &lineNameLabel, &playbackLabel, &lineColourLabel,
+                         &xOffsetLabel, &yOffsetLabel, &ratioLabel, &trackGainLabel, &trackPanLabel, &outputRouteLabel,
+                         &relationshipTargetLabel, &patternStepsLabel, &patternPulsesLabel, &lineNameLabel, &playbackLabel, &lineColourLabel,
                          &durationLabel, &probabilityLabel, &gainLabel, &panLabel })
     {
         label->setFont (juce::FontOptions (11.0f));
@@ -718,12 +793,26 @@ void OrbitsEditorComponent::configure()
     configureSlider (xOffsetSlider, -0.5, 0.5, 0.005);
     configureSlider (yOffsetSlider, -0.5, 0.5, 0.005);
     configureSlider (ratioSlider, 0.125, 8.0, 0.125);
+    configureSlider (trackGainSlider, 0.0, 1.5, 0.01);
+    configureSlider (trackPanSlider, -1.0, 1.0, 0.01);
+    configureSlider (patternStepsSlider, 2.0, 32.0, 1.0);
+    configureSlider (patternPulsesSlider, 1.0, 32.0, 1.0);
+    patternStepsSlider.setValue (8.0, juce::dontSendNotification);
+    patternPulsesSlider.setValue (4.0, juce::dontSendNotification);
+    patternStepsSlider.onValueChange = [this]
+    {
+        patternPulsesSlider.setRange (1.0, patternStepsSlider.getValue(), 1.0);
+        patternPulsesSlider.setValue (juce::jmin (patternPulsesSlider.getValue(), patternStepsSlider.getValue()), juce::dontSendNotification);
+    };
+    patternPulsesSlider.onValueChange = [] {};
     configureSlider (durationSlider, -1.0, 30.0, 0.05);
     configureSlider (probabilitySlider, 0.0, 1.0, 0.01);
     configureSlider (gainSlider, 0.0, 1.5, 0.01);
     configureSlider (panSlider, -1.0, 1.0, 0.01);
 
     clockModeBox.addItemList ({ "Free", "Project tempo", "Tempo ratio" }, 1);
+    relationshipActionBox.addItemList ({ "None", "Reset target", "Start target", "Stop target", "Phase-lock target" }, 1);
+    outputRouteBox.addItemList ({ "Stereo", "Left", "Right" }, 1);
     snapDivisionBox.addItemList ({ "1 per beat", "2 per beat", "4 per beat", "8 per beat", "16 per beat" }, 1);
     playbackBox.addItemList ({ "SuperCollider", "Pure Data (Pd)" }, 1);
     lineColourBox.addItemList ({ "Track colour", "Aqua", "Pink", "Gold", "Violet", "Mint", "Coral", "Blue", "Lime" }, 1);
@@ -757,14 +846,36 @@ void OrbitsEditorComponent::configure()
     deleteLineButton.setTooltip ("Delete the selected sound line");
     undoButton.setTooltip ("Undo the last Orbits edit");
     redoButton.setTooltip ("Redo the last Orbits edit");
-    trackBox.onChange = [this]
+    distributeButton.setTooltip ("Space every sound line evenly around this spiral");
+    rotateButton.setTooltip ("Rotate the pattern forward by one step");
+    repeatButton.setTooltip ("Repeat the selected sound line across the chosen steps");
+    reverseButton.setTooltip ("Reverse the order of sound lines around the spiral");
+    randomiseButton.setTooltip ("Randomise all sound-line positions");
+    euclideanButton.setTooltip ("Fill the chosen steps with an even Euclidean rhythm using the selected sound");
+    relationshipActionBox.onChange = [this]
     {
         if (refreshing) return;
-        selectedTrack = juce::jlimit (0, static_cast<int> (document.tracks.size()) - 1, trackBox.getSelectedItemIndex());
-        selectedLine = -1; refresh();
+        if (auto* current = track()) { pushUndoState(); current->relationshipAction = static_cast<OrbitsTrack::RelationshipAction> (relationshipActionBox.getSelectedItemIndex()); changed (false); refresh(); }
+    };
+    relationshipTargetBox.onChange = [this]
+    {
+        if (refreshing) return;
+        if (auto* current = track()) { pushUndoState(); current->relationshipTarget = relationshipTargetBox.getSelectedId() - 1; changed (false); refresh(); }
     };
     hideButton.onClick = [this] { if (auto* current = track()) { pushUndoState(); current->hidden = hideButton.getToggleState(); changed (false); refresh(); } };
     muteButton.onClick = [this] { if (auto* current = track()) { pushUndoState(); current->muted = muteButton.getToggleState(); changed (false); refresh(); } };
+    soloButton.onClick = [this] { if (auto* current = track()) { pushUndoState(); current->solo = soloButton.getToggleState(); changed (false); refresh(); } };
+    outputRouteBox.onChange = [this]
+    {
+        if (refreshing) return;
+        if (auto* current = track()) { pushUndoState(); current->outputRoute = static_cast<OrbitsTrack::OutputRoute> (outputRouteBox.getSelectedItemIndex()); changed (false); refresh(); }
+    };
+    distributeButton.onClick = [this] { applyPattern (0); };
+    rotateButton.onClick = [this] { applyPattern (1); };
+    repeatButton.onClick = [this] { applyPattern (2); };
+    reverseButton.onClick = [this] { applyPattern (3); };
+    randomiseButton.onClick = [this] { applyPattern (4); };
+    euclideanButton.onClick = [this] { applyPattern (5); };
     resetPhaseButton.onClick = [this] { if (auto* current = track()) { pushUndoState(); current->resetPhaseOnStart = resetPhaseButton.getToggleState(); changed (false); refresh(); } };
     clockModeBox.onChange = [this]
     {
@@ -813,6 +924,8 @@ void OrbitsEditorComponent::configure()
     stopButton.onClick = [this]
     {
         previewRunning = false; previewSeconds = 0.0; std::fill (previewPhases.begin(), previewPhases.end(), 0.0);
+        previewTrackPositions.assign (document.tracks.size(), 0.0);
+        previewTrackRunning.assign (document.tracks.size(), true);
         playButton.setButtonText ("Play"); canvas->repaint();
     };
     undoButton.onClick = [this] { undo(); };
@@ -850,9 +963,106 @@ void OrbitsEditorComponent::removeTrack()
 {
     if (document.tracks.size() <= 1) return;
     pushUndoState();
+    const auto removed = selectedTrack;
     document.tracks.erase (document.tracks.begin() + selectedTrack);
+    for (auto& item : document.tracks)
+    {
+        if (item.relationshipTarget == removed) { item.relationshipTarget = -1; item.relationshipAction = OrbitsTrack::RelationshipAction::none; }
+        else if (item.relationshipTarget > removed) --item.relationshipTarget;
+    }
     selectedTrack = juce::jlimit (0, static_cast<int> (document.tracks.size()) - 1, selectedTrack);
     selectedLine = -1; changed(); refresh();
+}
+
+void OrbitsEditorComponent::applyPattern (int operation)
+{
+    auto* current = track();
+    if (current == nullptr || current->lines.empty()) return;
+    const auto steps = juce::jlimit (2, 32, juce::roundToInt (patternStepsSlider.getValue()));
+    const auto pulses = juce::jlimit (1, steps, juce::roundToInt (patternPulsesSlider.getValue()));
+    if ((operation == 2 || operation == 5)
+        && ! juce::isPositiveAndBelow (selectedLine, static_cast<int> (current->lines.size()))) return;
+
+    pushUndoState();
+    auto placeAtPhase = [current] (OrbitsTriggerLine& item, double phase)
+    {
+        phase -= std::floor (phase);
+        const auto point = spiralPoint (*current, phase);
+        auto tangent = spiralPoint (*current, phase + 0.001) - spiralPoint (*current, phase - 0.001);
+        if (tangent.getDistanceFromOrigin() < 0.0001f) tangent = { 1.0f, 0.0f };
+        tangent /= tangent.getDistanceFromOrigin();
+        const juce::Point<float> normal { -tangent.y, tangent.x };
+        const auto halfLength = juce::jlimit (0.025f, 0.16f, item.start.getDistanceFrom (item.end) * 0.5f);
+        item.start = point - normal * halfLength;
+        item.end = point + normal * halfLength;
+    };
+
+    if (operation == 2 || operation == 5)
+    {
+        const auto source = current->lines[static_cast<size_t> (selectedLine)];
+        std::vector<OrbitsTriggerLine> generated;
+        for (int step = 0; step < steps; ++step)
+        {
+            const auto include = operation == 2 || ((step * pulses) % steps < pulses);
+            if (! include) continue;
+            auto copy = source;
+            copy.id = juce::Uuid().toString();
+            copy.sound.name = source.sound.name + " " + juce::String (generated.size() + 1);
+            placeAtPhase (copy, static_cast<double> (step) / steps);
+            generated.push_back (std::move (copy));
+        }
+        current->lines = std::move (generated);
+        selectedLine = current->lines.empty() ? -1 : 0;
+    }
+    else
+    {
+        document.refreshTriggerPhases();
+        std::vector<std::pair<double, OrbitsTriggerLine*>> ordered;
+        ordered.reserve (current->lines.size());
+        for (size_t i = 0; i < current->lines.size(); ++i)
+            ordered.push_back ({ current->lines[i].triggerPhases.empty() ? static_cast<double> (i) / static_cast<double> (current->lines.size())
+                                                                        : current->lines[i].triggerPhases.front(),
+                                 &current->lines[i] });
+        std::sort (ordered.begin(), ordered.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+        for (size_t i = 0; i < ordered.size(); ++i)
+        {
+            auto phase = ordered[i].first;
+            if (operation == 0) phase = static_cast<double> (i) / static_cast<double> (ordered.size());
+            else if (operation == 1) phase += 1.0 / steps;
+            else if (operation == 3) phase = 1.0 - phase;
+            else if (operation == 4) phase = juce::Random::getSystemRandom().nextDouble();
+            placeAtPhase (*ordered[i].second, phase);
+        }
+    }
+    document.refreshTriggerPhases();
+    changed (false); refresh();
+}
+
+int OrbitsEditorComponent::getNumRows() { return static_cast<int> (document.tracks.size()); }
+
+void OrbitsEditorComponent::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected)
+{
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (document.tracks.size()))) return;
+    const auto& item = document.tracks[static_cast<size_t> (row)];
+    if (selected) { g.setColour (juce::Colour (0xff1688f8).withAlpha (0.28f)); g.fillRect (0, 0, width, height); }
+    g.setColour (trackColour (item.colourIndex));
+    g.fillEllipse (10.0f, static_cast<float> (height) * 0.5f - 4.0f, 8.0f, 8.0f);
+    g.setColour (juce::Colours::white.withAlpha (item.hidden ? 0.35f : 0.9f));
+    g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+    g.drawText (item.name, 26, 2, width - 150, height - 4, juce::Justification::centredLeft);
+    auto detail = juce::String (document.effectiveBpm (item), 0) + " BPM  "
+                + juce::String (item.timeSigNumerator) + "/" + juce::String (item.timeSigDenominator)
+                + "  " + juce::String (item.lines.size()) + " sounds";
+    if (item.muted) detail = "MUTED  " + detail;
+    g.setColour (juce::Colours::white.withAlpha (0.48f));
+    g.setFont (juce::FontOptions (10.5f));
+    g.drawText (detail, juce::jmax (100, width - 205), 2, juce::jmin (195, width - 105), height - 4, juce::Justification::centredRight);
+}
+
+void OrbitsEditorComponent::selectedRowsChanged (int row)
+{
+    if (refreshing || ! juce::isPositiveAndBelow (row, static_cast<int> (document.tracks.size()))) return;
+    selectedTrack = row; selectedLine = -1; refresh();
 }
 
 void OrbitsEditorComponent::editSelectedLine()
@@ -935,10 +1145,8 @@ void OrbitsEditorComponent::refresh()
 {
     const juce::ScopedValueSetter<bool> guard (refreshing, true);
     selectedTrack = juce::jlimit (0, static_cast<int> (document.tracks.size()) - 1, selectedTrack);
-    trackBox.clear (juce::dontSendNotification);
-    for (int i = 0; i < static_cast<int> (document.tracks.size()); ++i)
-        trackBox.addItem (document.tracks[static_cast<size_t> (i)].name, i + 1);
-    trackBox.setSelectedItemIndex (selectedTrack, juce::dontSendNotification);
+    trackList.updateContent();
+    trackList.selectRow (selectedTrack, false, false);
     previewPhases.resize (document.tracks.size(), 0.0);
     if (auto* current = track())
     {
@@ -955,12 +1163,23 @@ void OrbitsEditorComponent::refresh()
         xOffsetSlider.setValue (current->xOffset, juce::dontSendNotification);
         yOffsetSlider.setValue (current->yOffset, juce::dontSendNotification);
         ratioSlider.setValue (current->tempoRatio, juce::dontSendNotification);
+        trackGainSlider.setValue (current->gain, juce::dontSendNotification);
+        trackPanSlider.setValue (current->pan, juce::dontSendNotification);
+        outputRouteBox.setSelectedItemIndex (static_cast<int> (current->outputRoute), juce::dontSendNotification);
         clockModeBox.setSelectedItemIndex (static_cast<int> (current->clockMode), juce::dontSendNotification);
         resetPhaseButton.setToggleState (current->resetPhaseOnStart, juce::dontSendNotification);
+        relationshipActionBox.setSelectedItemIndex (static_cast<int> (current->relationshipAction), juce::dontSendNotification);
+        relationshipTargetBox.clear (juce::dontSendNotification);
+        for (int i = 0; i < static_cast<int> (document.tracks.size()); ++i)
+            if (i != selectedTrack) relationshipTargetBox.addItem (document.tracks[static_cast<size_t> (i)].name, i + 1);
+        relationshipTargetBox.setSelectedId (current->relationshipTarget + 1, juce::dontSendNotification);
+        const auto hasRelationship = current->relationshipAction != OrbitsTrack::RelationshipAction::none;
+        relationshipTargetBox.setEnabled (hasRelationship);
         bpmSlider.setEnabled (current->clockMode == OrbitsTrack::ClockMode::free);
         ratioSlider.setEnabled (current->clockMode == OrbitsTrack::ClockMode::ratio);
         hideButton.setToggleState (current->hidden, juce::dontSendNotification);
         muteButton.setToggleState (current->muted, juce::dontSendNotification);
+        soloButton.setToggleState (current->solo, juce::dontSendNotification);
     }
     const auto hasLine = line() != nullptr;
     snapButton.setToggleState (document.snapToMusicalGrid, juce::dontSendNotification);
@@ -1014,21 +1233,25 @@ void OrbitsEditorComponent::updateInspectorVisibility()
     for (auto* button : { &trackTabButton, &shapeTabButton, &soundTabButton })
         button->setAlpha (button->getToggleState() ? 1.0f : 0.82f);
 
-    const std::array<juce::Component*, 12> trackControls {
-        &trackLabel, &trackBox, &hideButton, &muteButton, &clockModeLabel, &clockModeBox,
+    const std::array<juce::Component*, 20> trackControls {
+        &trackLabel, &trackList, &hideButton, &muteButton, &soloButton, &mixLabel, &trackGainLabel, &trackGainSlider,
+        &trackPanLabel, &trackPanSlider, &outputRouteLabel, &outputRouteBox, &clockModeLabel, &clockModeBox,
         &ratioLabel, &ratioSlider, &resetPhaseButton, &bpmLabel, &bpmSlider, &meterLabel
     };
-    const std::array<juce::Component*, 5> trackControlsMore {
-        &numeratorLabel, &numeratorSlider, &denominatorLabel, &denominatorSlider, &barsLabel
+    const std::array<juce::Component*, 9> trackControlsMore {
+        &numeratorLabel, &numeratorSlider, &denominatorLabel, &denominatorSlider, &barsLabel,
+        &relationshipLabel, &relationshipTargetLabel, &relationshipActionBox, &relationshipTargetBox
     };
     const std::array<juce::Component*, 1> trackControlsLast { &barsSlider };
     const std::array<juce::Component*, 12> shapeControls {
         &shapeLabel, &thicknessLabel, &thicknessSlider, &warpLabel, &warpSlider, &twistLabel,
         &twistSlider, &phaseLabel, &phaseSlider, &xRotationLabel, &xRotationSlider, &yRotationLabel
     };
-    const std::array<juce::Component*, 9> shapeControlsMore {
+    const std::array<juce::Component*, 19> shapeControlsMore {
         &yRotationSlider, &xOffsetLabel, &xOffsetSlider, &yOffsetLabel, &yOffsetSlider,
-        &snapLabel, &snapButton, &snapDivisionBox, nullptr
+        &snapLabel, &snapButton, &snapDivisionBox, &patternLabel, &patternStepsLabel, &patternStepsSlider,
+        &patternPulsesLabel, &patternPulsesSlider, &distributeButton, &rotateButton, &repeatButton,
+        &reverseButton, &randomiseButton, &euclideanButton
     };
     const std::array<juce::Component*, 19> soundControls {
         &soundLineLabel, &lineNameLabel, &lineNameEditor, &playbackLabel, &playbackBox,
@@ -1046,6 +1269,12 @@ void OrbitsEditorComponent::updateInspectorVisibility()
     setVisible (shapeControls, inspectorTab == InspectorTab::shape);
     setVisible (shapeControlsMore, inspectorTab == InspectorTab::shape);
     setVisible (soundControls, inspectorTab == InspectorTab::sound);
+    if (inspectorTab == InspectorTab::track)
+    {
+        const auto showTarget = track() != nullptr && track()->relationshipAction != OrbitsTrack::RelationshipAction::none;
+        relationshipTargetLabel.setVisible (showTarget);
+        relationshipTargetBox.setVisible (showTarget);
+    }
 }
 
 void OrbitsEditorComponent::timerCallback()
@@ -1056,18 +1285,23 @@ void OrbitsEditorComponent::timerCallback()
     if (! previewRunning) { canvas->repaint(); return; }
     const auto delta = juce::jlimit (0.0, 0.1, now - lastPreviewTime);
     lastPreviewTime = now;
-    const auto previousTime = previewSeconds;
     previewSeconds += delta;
     previewPhases.resize (document.tracks.size(), 0.0);
+    if (previewTrackPositions.size() != document.tracks.size()) previewTrackPositions.assign (document.tracks.size(), 0.0);
+    if (previewTrackRunning.size() != document.tracks.size()) previewTrackRunning.assign (document.tracks.size(), true);
+    std::vector<int> wraps (document.tracks.size(), 0);
+    const auto anySolo = std::any_of (document.tracks.begin(), document.tracks.end(), [] (const auto& item) { return item.solo; });
     for (int trackIndex = 0; trackIndex < static_cast<int> (document.tracks.size()); ++trackIndex)
     {
         const auto& current = document.tracks[static_cast<size_t> (trackIndex)];
         const auto loopSeconds = document.loopDurationSeconds (current);
-        const auto previousPosition = previousTime / loopSeconds;
-        const auto nextPosition = previewSeconds / loopSeconds;
+        const auto previousPosition = previewTrackPositions[static_cast<size_t> (trackIndex)];
+        const auto nextPosition = previousPosition + (previewTrackRunning[static_cast<size_t> (trackIndex)] ? delta / loopSeconds : 0.0);
+        previewTrackPositions[static_cast<size_t> (trackIndex)] = nextPosition;
+        wraps[static_cast<size_t> (trackIndex)] = static_cast<int> (std::floor (nextPosition) - std::floor (previousPosition));
         const auto nextPhase = std::fmod (nextPosition, 1.0);
         previewPhases[static_cast<size_t> (trackIndex)] = nextPhase;
-        if (current.muted) continue;
+        if (current.muted || (anySolo && ! current.solo)) continue;
         for (const auto& triggerLine : current.lines)
             for (const auto phase : triggerLine.triggerPhases)
             {
@@ -1077,9 +1311,33 @@ void OrbitsEditorComponent::timerCallback()
                 {
                     const auto passed = juce::Random::getSystemRandom().nextFloat() <= triggerLine.sound.probability;
                     triggerFeedback[triggerLine.id] = { passed, now + (passed ? 0.24 : 0.16) };
-                    if (passed && audition) audition (triggerLine.sound);
+                    if (passed && audition)
+                    {
+                        auto sound = triggerLine.sound;
+                        sound.gain *= current.gain;
+                        sound.pan = current.outputRoute == OrbitsTrack::OutputRoute::left ? -1.0f
+                                  : current.outputRoute == OrbitsTrack::OutputRoute::right ? 1.0f
+                                  : juce::jlimit (-1.0f, 1.0f, sound.pan + current.pan);
+                        audition (sound);
+                    }
                 }
             }
+    }
+    for (int source = 0; source < static_cast<int> (document.tracks.size()); ++source)
+    {
+        const auto& relation = document.tracks[static_cast<size_t> (source)];
+        const auto target = relation.relationshipTarget;
+        if (! juce::isPositiveAndBelow (target, static_cast<int> (document.tracks.size())) || target == source) continue;
+        if (relation.relationshipAction == OrbitsTrack::RelationshipAction::phaseLock)
+            previewTrackPositions[static_cast<size_t> (target)] = std::floor (previewTrackPositions[static_cast<size_t> (target)])
+                                                             + std::fmod (previewTrackPositions[static_cast<size_t> (source)], 1.0);
+        else if (wraps[static_cast<size_t> (source)] > 0)
+        {
+            if (relation.relationshipAction == OrbitsTrack::RelationshipAction::reset) previewTrackPositions[static_cast<size_t> (target)] = 0.0;
+            else if (relation.relationshipAction == OrbitsTrack::RelationshipAction::start) previewTrackRunning[static_cast<size_t> (target)] = true;
+            else if (relation.relationshipAction == OrbitsTrack::RelationshipAction::stop) previewTrackRunning[static_cast<size_t> (target)] = false;
+        }
+        previewPhases[static_cast<size_t> (target)] = std::fmod (previewTrackPositions[static_cast<size_t> (target)], 1.0);
     }
     canvas->repaint();
 }
@@ -1116,51 +1374,74 @@ void OrbitsEditorComponent::resized()
 
     auto body = getLocalBounds().withTrimmedTop (72);
     const auto inspectorWidth = getWidth() >= 1120 ? 360 : 324;
-    inspectorViewport.setBounds (body.removeFromRight (inspectorWidth).reduced (12, 10));
-    body.removeFromRight (10);
-    canvas->setBounds (body.reduced (12, 10));
-
-    const auto contentWidth = juce::jmax (280, inspectorViewport.getWidth() - inspectorViewport.getScrollBarThickness() - 4);
-    inspectorContent.setSize (contentWidth, inspectorViewport.getHeight());
-    auto inspector = inspectorContent.getLocalBounds().reduced (4, 2);
-
-    auto tabs = inspector.removeFromTop (32);
+    auto inspectorPanel = body.removeFromRight (inspectorWidth).reduced (12, 10);
+    auto tabs = inspectorPanel.removeFromTop (34);
     const auto tabWidth = tabs.getWidth() / 3;
     trackTabButton.setBounds (tabs.removeFromLeft (tabWidth));
     shapeTabButton.setBounds (tabs.removeFromLeft (tabWidth));
     soundTabButton.setBounds (tabs);
-    inspector.removeFromTop (18);
+    inspectorPanel.removeFromTop (10);
+    inspectorViewport.setBounds (inspectorPanel);
+    body.removeFromRight (10);
+    canvas->setBounds (body.reduced (12, 10));
+
+    const auto contentWidth = juce::jmax (280, inspectorViewport.getWidth() - inspectorViewport.getScrollBarThickness() - 4);
+    const auto contentHeight = inspectorTab == InspectorTab::track ? 590
+                              : inspectorTab == InspectorTab::shape ? 520
+                              : juce::jmax (520, inspectorViewport.getHeight());
+    inspectorContent.setSize (contentWidth, juce::jmax (contentHeight, inspectorViewport.getHeight()));
+    if (contentHeight <= inspectorViewport.getHeight())
+        inspectorViewport.setViewPosition (0, 0);
+    auto inspector = inspectorContent.getLocalBounds().reduced (4, 2);
 
     if (inspectorTab == InspectorTab::track)
     {
         trackLabel.setBounds (inspector.removeFromTop (18));
-        trackBox.setBounds (inspector.removeFromTop (34));
-        inspector.removeFromTop (6);
-        auto trackActions = inspector.removeFromTop (28);
-        hideButton.setBounds (trackActions.removeFromLeft (140));
-        muteButton.setBounds (trackActions);
-        inspector.removeFromTop (18);
+        trackList.setBounds (inspector.removeFromTop (72));
+        inspector.removeFromTop (4);
+        auto trackActions = inspector.removeFromTop (26);
+        const auto actionWidth = trackActions.getWidth() / 3;
+        hideButton.setBounds (trackActions.removeFromLeft (actionWidth));
+        muteButton.setBounds (trackActions.removeFromLeft (actionWidth));
+        soloButton.setBounds (trackActions);
+        inspector.removeFromTop (8);
+
+        mixLabel.setBounds (inspector.removeFromTop (18));
+        auto mixRow = [&inspector] (juce::Label& label, juce::Component& control)
+        {
+            auto row = inspector.removeFromTop (30); label.setBounds (row.removeFromLeft (72)); control.setBounds (row);
+        };
+        mixRow (trackGainLabel, trackGainSlider);
+        mixRow (trackPanLabel, trackPanSlider);
+        mixRow (outputRouteLabel, outputRouteBox);
+        inspector.removeFromTop (8);
 
         clockModeLabel.setBounds (inspector.removeFromTop (18));
-        clockModeBox.setBounds (inspector.removeFromTop (30));
-        auto clockOptions = inspector.removeFromTop (34);
+        clockModeBox.setBounds (inspector.removeFromTop (28));
+        auto clockOptions = inspector.removeFromTop (30);
         ratioLabel.setBounds (clockOptions.removeFromLeft (90)); ratioSlider.setBounds (clockOptions);
-        resetPhaseButton.setBounds (inspector.removeFromTop (28));
-        inspector.removeFromTop (16);
+        resetPhaseButton.setBounds (inspector.removeFromTop (25));
+        inspector.removeFromTop (10);
 
         auto parameterRow = [&inspector] (juce::Label& label, juce::Component& control)
         {
-            auto row = inspector.removeFromTop (38);
+            auto row = inspector.removeFromTop (34);
             label.setBounds (row.removeFromLeft (98));
             control.setBounds (row);
         };
         parameterRow (bpmLabel, bpmSlider);
         meterLabel.setBounds (inspector.removeFromTop (18));
-        auto meter = inspector.removeFromTop (46);
+        auto meter = inspector.removeFromTop (40);
         auto meterLeft = meter.removeFromLeft ((meter.getWidth() - 8) / 2); meter.removeFromLeft (8);
         numeratorLabel.setBounds (meterLeft.removeFromTop (15)); numeratorSlider.setBounds (meterLeft);
         denominatorLabel.setBounds (meter.removeFromTop (15)); denominatorSlider.setBounds (meter);
         parameterRow (barsLabel, barsSlider);
+        inspector.removeFromTop (8);
+        relationshipLabel.setBounds (inspector.removeFromTop (18));
+        relationshipActionBox.setBounds (inspector.removeFromTop (28));
+        auto relationTarget = inspector.removeFromTop (30);
+        relationshipTargetLabel.setBounds (relationTarget.removeFromLeft (72));
+        relationshipTargetBox.setBounds (relationTarget);
         return;
     }
 
@@ -1184,6 +1465,23 @@ void OrbitsEditorComponent::resized()
         snapLabel.setBounds (inspector.removeFromTop (20));
         auto snapRow = inspector.removeFromTop (34);
         snapButton.setBounds (snapRow.removeFromLeft (142)); snapDivisionBox.setBounds (snapRow);
+        inspector.removeFromTop (18);
+        patternLabel.setBounds (inspector.removeFromTop (20));
+        auto patternValues = inspector.removeFromTop (38);
+        auto leftValue = patternValues.removeFromLeft ((patternValues.getWidth() - 8) / 2); patternValues.removeFromLeft (8);
+        patternStepsLabel.setBounds (leftValue.removeFromLeft (42)); patternStepsSlider.setBounds (leftValue);
+        patternPulsesLabel.setBounds (patternValues.removeFromLeft (44)); patternPulsesSlider.setBounds (patternValues);
+        inspector.removeFromTop (6);
+        auto patternRow = [&inspector] (juce::TextButton& a, juce::TextButton& b, juce::TextButton& c)
+        {
+            auto row = inspector.removeFromTop (30); const auto width = (row.getWidth() - 8) / 3;
+            a.setBounds (row.removeFromLeft (width)); row.removeFromLeft (4);
+            b.setBounds (row.removeFromLeft (width)); row.removeFromLeft (4);
+            c.setBounds (row);
+        };
+        patternRow (distributeButton, rotateButton, repeatButton);
+        inspector.removeFromTop (4);
+        patternRow (reverseButton, randomiseButton, euclideanButton);
         return;
     }
 

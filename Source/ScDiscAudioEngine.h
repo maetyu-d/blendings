@@ -133,6 +133,7 @@ private:
     bool scheduleOrcaGrid (const DiscAudioTrigger& trigger, std::int64_t startSample);
     void dispatchDueScheduledEvents (std::int64_t now);
     [[nodiscard]] std::int64_t nextScheduledSampleAfter (std::int64_t now) const;
+    [[nodiscard]] std::int64_t alignedPdEventSample (std::int64_t sample) const noexcept;
     juce::String synthForProgram (const juce::String& program);
     juce::String compileProgram (const juce::String& program);
     juce::String synthForPdPatch (const juce::String& patch);
