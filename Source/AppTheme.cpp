@@ -8,6 +8,27 @@ namespace blendings::ui
 namespace
 {
 bool rainbowUiEnabled = false;
+
+float linearColourChannel (uint8_t value)
+{
+    const auto channel = static_cast<float> (value) / 255.0f;
+    return channel <= 0.04045f ? channel / 12.92f
+                              : std::pow ((channel + 0.055f) / 1.055f, 2.4f);
+}
+
+float relativeLuminance (juce::Colour colour)
+{
+    return 0.2126f * linearColourChannel (colour.getRed())
+         + 0.7152f * linearColourChannel (colour.getGreen())
+         + 0.0722f * linearColourChannel (colour.getBlue());
+}
+
+float contrastRatio (juce::Colour first, juce::Colour second)
+{
+    const auto lighter = juce::jmax (relativeLuminance (first), relativeLuminance (second));
+    const auto darker = juce::jmin (relativeLuminance (first), relativeLuminance (second));
+    return (lighter + 0.05f) / (darker + 0.05f);
+}
 }
 
 void setRainbowUiEnabled (bool enabled) { rainbowUiEnabled = enabled; }
@@ -40,6 +61,13 @@ juce::Colour carouselElementColour(){ return rainbowUiEnabled ? juce::Colour (0x
 juce::Colour pipeElementColour() { return rainbowUiEnabled ? juce::Colour (0xff00bf9a) : juce::Colour (0xff42e8c2); }
 juce::Colour orbitsElementColour() { return rainbowUiEnabled ? juce::Colour (0xffff3d91) : juce::Colour (0xffe96ba8); }
 juce::Colour accentColour()      { return rainbowUiEnabled ? juce::Colour (0xff1746ff) : juce::Colour (0xff0a84ff); }
+
+juce::Colour contrastingForeground (juce::Colour background)
+{
+    const auto dark = juce::Colour (0xff101522);
+    const auto light = juce::Colours::white;
+    return contrastRatio (background, dark) >= contrastRatio (background, light) ? dark : light;
+}
 
 juce::Colour pipeColourForIndex (int index)
 {
@@ -76,7 +104,7 @@ void styleEditorButton (juce::TextButton& button, const juce::String& text)
     button.setColour (juce::TextButton::buttonColourId, raisedSurface());
     button.setColour (juce::TextButton::buttonOnColourId, accentColour());
     button.setColour (juce::TextButton::textColourOffId, textPrimary());
-    button.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+    button.setColour (juce::TextButton::textColourOnId, contrastingForeground (accentColour()));
 }
 
 void styleScDurationBox (juce::TextEditor& editor)

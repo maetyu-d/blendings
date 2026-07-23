@@ -32,12 +32,12 @@ public:
         randomInterval.setColour (juce::ToggleButton::textColourId, textPrimary()); addAndMakeVisible (randomInterval);
         configureSlider (low, lowLabel, "Minimum", 0.25, 32.0, 0.25, value.intervalLowBeats, " beats");
         configureSlider (high, highLabel, "Maximum", 0.25, 32.0, 0.25, value.intervalHighBeats, " beats");
-        configureSlider (speed, speedLabel, "Multiplier", 0.25, 4.0, 0.05, value.speed, "x");
+        configureSlider (speed, speedLabel, "Multiplier", 0.25, maxDropSpeedMultiplier, 0.05, value.speed, "x");
         randomSpeed.setButtonText ("Vary speed");
         randomSpeed.setToggleState (value.randomSpeed, juce::dontSendNotification);
         randomSpeed.setColour (juce::ToggleButton::textColourId, textPrimary()); addAndMakeVisible (randomSpeed);
-        configureSlider (speedLow, speedLowLabel, "Minimum", 0.25, 4.0, 0.05, value.speedLow, "x");
-        configureSlider (speedHigh, speedHighLabel, "Maximum", 0.25, 4.0, 0.05, value.speedHigh, "x");
+        configureSlider (speedLow, speedLowLabel, "Minimum", 0.25, maxDropSpeedMultiplier, 0.05, value.speedLow, "x");
+        configureSlider (speedHigh, speedHighLabel, "Maximum", 0.25, maxDropSpeedMultiplier, 0.05, value.speedHigh, "x");
         configureSlider (probability, probabilityLabel, "Emit chance", 0.0, 100.0, 1.0, value.probability * 100.0, "%");
         styleEditorLabel (directionLabel, 12.0f, false); directionLabel.setText ("Direction", juce::dontSendNotification); addAndMakeVisible (directionLabel);
         enabled.setButtonText ("Enabled"); enabled.setToggleState (value.enabled, juce::dontSendNotification); enabled.setColour (juce::ToggleButton::textColourId, textPrimary()); addAndMakeVisible (enabled);
@@ -315,7 +315,7 @@ public:
         styleEditorLabel (speedLabel, 12.0f, false);
         speedLabel.setText ("Relative to global BPM", juce::dontSendNotification);
         addAndMakeVisible (speedLabel);
-        speed.setRange (0.125, 4.0, 0.125);
+        speed.setRange (minDropSpeedMultiplier, maxDropSpeedMultiplier, 0.125);
         speed.setValue (value.bpmMultiplier, juce::dontSendNotification);
         speed.setSliderStyle (juce::Slider::LinearHorizontal);
         speed.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 26);
@@ -541,7 +541,7 @@ private:
     void configureSlider (juce::Label& label, juce::Slider& slider, const juce::String& text, double current)
     {
         styleEditorLabel (label, 12.0f, false); label.setText (text, juce::dontSendNotification); addAndMakeVisible (label);
-        slider.setRange (0.125, 4.0, 0.125); slider.setValue (current, juce::dontSendNotification);
+        slider.setRange (minDropSpeedMultiplier, maxDropSpeedMultiplier, 0.125); slider.setValue (current, juce::dontSendNotification);
         slider.setSliderStyle (juce::Slider::LinearHorizontal); slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 26);
         slider.setTextValueSuffix ("x"); slider.setColour (juce::Slider::thumbColourId, juce::Colour (0xff7dd3fc)); addAndMakeVisible (slider);
     }
@@ -638,7 +638,7 @@ public:
         styleEditorLabel (speedLabel, 12.0f, false);
         speedLabel.setText ("Drop speed", juce::dontSendNotification);
         addAndMakeVisible (speedLabel);
-        speed.setRange (0.125, 4.0, 0.125);
+        speed.setRange (minDropSpeedMultiplier, maxDropSpeedMultiplier, 0.125);
         speed.setValue (value.compareSpeed, juce::dontSendNotification);
         speed.setSliderStyle (juce::Slider::LinearHorizontal);
         speed.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 26);

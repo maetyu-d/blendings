@@ -13,6 +13,9 @@
 
 namespace blendings
 {
+inline constexpr double minDropSpeedMultiplier = 0.125;
+inline constexpr double maxDropSpeedMultiplier = 12.0;
+
 juce::String defaultScCode();
 juce::String defaultPdPatch();
 ScoreDocument defaultScSheet();

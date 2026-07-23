@@ -36,6 +36,7 @@ juce::Colour carouselElementColour();
 juce::Colour pipeElementColour();
 juce::Colour orbitsElementColour();
 juce::Colour accentColour();
+juce::Colour contrastingForeground (juce::Colour background);
 
 juce::Colour pipeColourForIndex (int index);
 int pipePaletteIndex (juce::Colour colour);

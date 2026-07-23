@@ -280,7 +280,7 @@ public:
             g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 0.8f);
         }
 
-        g.setColour (isActive ? juce::Colours::white : textPrimary().withAlpha (0.90f));
+        g.setColour (isActive ? contrastingForeground (iconAccent) : textPrimary().withAlpha (0.90f));
         const auto iconArea = bounds.withSizeKeepingCentre ((bounds.getWidth() - 14.0f) * iconScale,
                                                            (bounds.getHeight() - 14.0f) * iconScale);
         drawIcon (g, iconArea);
@@ -290,6 +290,11 @@ private:
     Icon icon;
     float iconScale = 1.0f;
     juce::Colour iconAccent { accentColour() };
+
+    juce::Colour activeIconForeground() const
+    {
+        return contrastingForeground (iconAccent);
+    }
 
     void drawIcon (juce::Graphics& g, juce::Rectangle<float> area) const
     {
@@ -382,7 +387,7 @@ private:
                     g.fillEllipse (node);
                     g.setColour (getToggleState() ? iconAccent : appBackground());
                     g.fillEllipse (node.reduced (2.0f));
-                    g.setColour (getToggleState() ? juce::Colours::white : textPrimary().withAlpha (0.90f));
+                    g.setColour (getToggleState() ? activeIconForeground() : textPrimary().withAlpha (0.90f));
                 }
                 break;
             }
@@ -391,7 +396,7 @@ private:
             {
                 g.drawEllipse (area.reduced (1.5f), 2.0f);
                 g.fillEllipse (area.reduced (6.0f));
-                g.setColour ((getToggleState() ? juce::Colours::white : textPrimary()).withAlpha (0.38f));
+                g.setColour ((getToggleState() ? activeIconForeground() : textPrimary()).withAlpha (0.52f));
                 g.drawEllipse (area.reduced (4.0f), 1.2f);
                 break;
             }
@@ -583,11 +588,11 @@ private:
                 const auto outer = area.reduced (1.0f);
                 const auto inner = area.reduced (6.3f);
                 g.drawEllipse (outer, 1.7f);
-                g.setColour ((getToggleState() ? appBackground() : textPrimary()).withAlpha (0.42f));
+                g.setColour ((getToggleState() ? iconAccent : textPrimary()).withAlpha (0.58f));
                 g.drawEllipse (inner, 1.4f);
                 g.fillEllipse (juce::Rectangle<float> (4.2f, 4.2f)
                                     .withCentre ({ outer.getRight() - 2.0f, outer.getCentreY() - 5.5f }));
-                g.setColour (getToggleState() ? appBackground() : textPrimary().withAlpha (0.82f));
+                g.setColour (getToggleState() ? activeIconForeground() : textPrimary().withAlpha (0.82f));
                 g.drawLine ({ outer.getX() + 2.0f, outer.getBottom() - 2.0f,
                               outer.getRight() - 1.5f, outer.getY() + 1.5f }, 2.1f);
                 break;
@@ -891,6 +896,7 @@ public:
     {
         juce::Path path;
         juce::Rectangle<float> bounds;
+        int routeIndex = -1;
         bool selected = false;
         bool pipe = false;
         bool warpPipe = false;
@@ -966,6 +972,7 @@ public:
     {
         int pipes = 0, drops = 0, devices = 0;
         double flowUpdateMs = 0.0;
+        float maxTravelBacklog = 0.0f;
         size_t contactChecks = 0, stressWorkUnits = 0;
         bool stressMode = false;
     };
@@ -987,6 +994,8 @@ public:
                          + pipeCloners().size() + pipeSpeedLimits().size() + pipeWaits().size()
                          + pipeStrikes().size() + pipeTeleports().size() + pipeFilters().size() + pipeLogics().size());
         result.flowUpdateMs = lastFlowUpdateMs;
+        for (const auto& pulse : flowPulses)
+            result.maxTravelBacklog = juce::jmax (result.maxTravelBacklog, pulse.travelBacklog);
         result.contactChecks = lastContactChecks;
         result.stressMode = performanceStressMode;
         result.stressWorkUnits = lastStressWorkUnits;
@@ -1193,6 +1202,17 @@ public:
     {
         flowDebugVisible = shouldShow;
         repaint();
+    }
+
+    void setMidinousTopLevelView (bool shouldUseMidinousView)
+    {
+        midinousTopLevelView = shouldUseMidinousView;
+        repaint();
+    }
+
+    bool isMidinousTopLevelViewActive() const noexcept
+    {
+        return midinousTopLevelView && worldPath.empty() && ! modulationLayerVisible;
     }
 
     int getRouteCount() const noexcept { return static_cast<int> (routes().size()); }
@@ -2304,7 +2324,7 @@ public:
         routePaintItems.reserve (routes().size() + (currentRoute.isDrawable() ? 1u : 0u));
 
         for (int i = 0; i < static_cast<int> (routes().size()); ++i)
-            addRoutePaintItem (routePaintItems, routes()[static_cast<size_t> (i)], i == selectedRoute, 1.0f);
+            addRoutePaintItem (routePaintItems, routes()[static_cast<size_t> (i)], i == selectedRoute, 1.0f, i);
 
         if (currentRoute.isDrawable())
             addRoutePaintItem (routePaintItems, currentRoute, false, 0.68f);
@@ -2313,6 +2333,7 @@ public:
             for (const auto& item : routePaintItems)
                 drawRouteLayer (g, item, layer);
 
+        drawMidinousRouteDirectionMarkers (g);
         drawLogicSignalTraces (g);
         drawFlowPulses (g);
         drawFlowDebugEvents (g);
@@ -2323,9 +2344,24 @@ public:
         {
             return juce::Rectangle<float> (deviceDiameter, deviceDiameter).withCentre (position);
         };
-        const auto drawRoundDevice = [&g, &deviceArea, deviceScale] (juce::Point<float> position, juce::Colour colour)
+        const auto drawRoundDevice = [this, &g, &deviceArea, deviceScale] (juce::Point<float> position, juce::Colour colour)
         {
             const auto area = deviceArea (position);
+            if (isMidinousTopLevelViewActive())
+            {
+                const auto tile = area.expanded (2.0f * deviceScale);
+                g.setColour (juce::Colour (0xff070a10).withAlpha (0.80f));
+                g.fillRoundedRectangle (tile.translated (1.0f * deviceScale, 1.5f * deviceScale), 3.0f * deviceScale);
+                g.setColour (juce::Colour (0xff171d27));
+                g.fillRoundedRectangle (tile, 3.0f * deviceScale);
+                g.setColour (colour.withAlpha (0.90f));
+                g.drawRoundedRectangle (tile, 3.0f * deviceScale, juce::jmax (0.9f, 1.25f * deviceScale));
+                g.setColour (colour.withAlpha (0.22f));
+                g.fillEllipse (area.reduced (2.5f * deviceScale));
+                g.setColour (colour.brighter (0.16f));
+                g.drawEllipse (area.reduced (3.0f * deviceScale), juce::jmax (1.0f, 1.5f * deviceScale));
+                return;
+            }
             const auto rim = area.expanded (1.4f * deviceScale);
             g.setColour (juce::Colour (0xff010504).withAlpha (0.52f));
             g.fillEllipse (area.translated (1.5f * deviceScale, 2.0f * deviceScale).expanded (2.0f * deviceScale));
@@ -2335,21 +2371,35 @@ public:
             g.fillEllipse (area.reduced (2.3f * deviceScale));
             g.setColour (juce::Colours::white.withAlpha (0.24f));
             g.fillEllipse (area.reduced (4.0f * deviceScale).withTrimmedBottom (area.getHeight() * 0.34f));
-            g.setColour (juce::Colour (0xff020807).withAlpha (0.46f));
-            g.drawEllipse (rim, juce::jmax (0.7f, deviceScale));
+            g.setColour (juce::Colour (0xff101522).withAlpha (isRainbowUiEnabled() ? 0.88f : 0.46f));
+            g.drawEllipse (rim, juce::jmax (0.7f, (isRainbowUiEnabled() ? 1.45f : 1.0f) * deviceScale));
         };
-        const auto drawSquareDevice = [&g, &deviceArea, deviceScale] (juce::Point<float> position, juce::Colour colour)
+        const auto drawSquareDevice = [this, &g, &deviceArea, deviceScale] (juce::Point<float> position, juce::Colour colour)
         {
             const auto area = deviceArea (position);
             const auto radius = 4.0f * deviceScale;
+            if (isMidinousTopLevelViewActive())
+            {
+                const auto tile = area.expanded (2.0f * deviceScale);
+                g.setColour (juce::Colour (0xff070a10).withAlpha (0.80f));
+                g.fillRoundedRectangle (tile.translated (1.0f * deviceScale, 1.5f * deviceScale), 3.0f * deviceScale);
+                g.setColour (juce::Colour (0xff171d27));
+                g.fillRoundedRectangle (tile, 3.0f * deviceScale);
+                g.setColour (colour.withAlpha (0.22f));
+                g.fillRoundedRectangle (area.reduced (2.5f * deviceScale), 2.0f * deviceScale);
+                g.setColour (colour.brighter (0.14f));
+                g.drawRoundedRectangle (tile, 3.0f * deviceScale, juce::jmax (0.9f, 1.25f * deviceScale));
+                return;
+            }
             g.setColour (juce::Colour (0xff010504).withAlpha (0.52f));
             g.fillRoundedRectangle (area.translated (1.5f * deviceScale, 2.0f * deviceScale).expanded (2.0f * deviceScale), radius);
             g.setColour (colour.withMultipliedAlpha (0.96f));
             g.fillRoundedRectangle (area.expanded (1.4f * deviceScale), radius);
             g.setColour (colour.darker (0.58f).withMultipliedAlpha (0.98f));
             g.fillRoundedRectangle (area.reduced (2.3f * deviceScale), radius * 0.72f);
-            g.setColour (juce::Colour (0xff020807).withAlpha (0.46f));
-            g.drawRoundedRectangle (area.expanded (1.4f * deviceScale), radius, juce::jmax (0.7f, deviceScale));
+            g.setColour (juce::Colour (0xff101522).withAlpha (isRainbowUiEnabled() ? 0.88f : 0.46f));
+            g.drawRoundedRectangle (area.expanded (1.4f * deviceScale), radius,
+                                    juce::jmax (0.7f, (isRainbowUiEnabled() ? 1.45f : 1.0f) * deviceScale));
         };
 
         for (const auto& tap : pipeTaps())
@@ -2633,6 +2683,12 @@ public:
 
         if (tool == Tool::edit)
             drawNodes (g);
+
+        if (isMidinousTopLevelViewActive())
+        {
+            g.addTransform (getViewTransform().inverted());
+            drawMidinousWorkspaceFeedback (g);
+        }
     }
 
     void resized() override {}
@@ -3931,6 +3987,7 @@ private:
     bool orbitElementsDimmed = false;
     bool compactDiscs = false;
     bool flowDebugVisible = false;
+    bool midinousTopLevelView = false;
     bool modulationLayerVisible = false;
     bool restoringHistory = false;
     juce::ValueTree lastCommittedState;
@@ -3974,7 +4031,7 @@ private:
     juce::Point<float> viewOffset { 0.0f, 0.0f };
     juce::Point<float> panStartScreen;
     juce::Point<float> panStartOffset;
-    struct FlowPulse { int routeIndex = -1; float distance = 0.0f; int lastDisc = -1; double speed = 1.0; double probability = 1.0; bool reverse = false; int lastDrain = -1; int lastCloner = -1; int lastSpeedLimit = -1; int lastWait = -1; double waitBeatsRemaining = 0.0; int lastStrike = -1; int lastTeleport = -1; int lastFilter = -1; int lastLogic = -1; int heldByDisc = -1; int heldByLogic = -1; double logicHoldStartedBeat = 0.0; int heldIncomingRoute = -1; int heldIncomingFromNode = -1; juce::Point<float> heldJunction; int bypassLogic = -1; bool randomLogicExit = false; };
+    struct FlowPulse { int routeIndex = -1; float distance = 0.0f; float travelBacklog = 0.0f; int lastDisc = -1; double speed = 1.0; double probability = 1.0; bool reverse = false; int lastDrain = -1; int lastCloner = -1; int lastSpeedLimit = -1; int lastWait = -1; double waitBeatsRemaining = 0.0; int lastStrike = -1; int lastTeleport = -1; int lastFilter = -1; int lastLogic = -1; int heldByDisc = -1; int heldByLogic = -1; double logicHoldStartedBeat = 0.0; int heldIncomingRoute = -1; int heldIncomingFromNode = -1; juce::Point<float> heldJunction; int bypassLogic = -1; bool randomLogicExit = false; };
     std::vector<FlowPulse> flowPulses;
     static constexpr size_t maxFlowPulses = 2048;
     struct FlowDebugEvent { juce::Point<float> position; juce::String text; double expiresMs = 0.0; };
@@ -4054,8 +4111,9 @@ private:
             tap.intervalBeats = static_cast<double> (child.getProperty ("interval", 1.0));
             tap.speed = static_cast<double> (child.getProperty ("speed", 1.0));
             tap.randomSpeed = static_cast<bool> (child.getProperty ("randomSpeed", false));
-            tap.speedLow = juce::jlimit (0.25, 4.0, static_cast<double> (child.getProperty ("speedLow", 0.5)));
-            tap.speedHigh = juce::jlimit (tap.speedLow, 4.0, static_cast<double> (child.getProperty ("speedHigh", 1.5)));
+            tap.speed = juce::jlimit (0.25, maxDropSpeedMultiplier, tap.speed);
+            tap.speedLow = juce::jlimit (0.25, maxDropSpeedMultiplier, static_cast<double> (child.getProperty ("speedLow", 0.5)));
+            tap.speedHigh = juce::jlimit (tap.speedLow, maxDropSpeedMultiplier, static_cast<double> (child.getProperty ("speedHigh", 1.5)));
             tap.probability = static_cast<double> (child.getProperty ("probability", 1.0));
             tap.reverse = static_cast<bool> (child.getProperty ("reverse", false));
             tap.enabled = static_cast<bool> (child.getProperty ("enabled", true));
@@ -4169,7 +4227,7 @@ private:
             if (child.hasType ("speedLimit"))
             {
                 destination.push_back ({ { static_cast<float> (child["x"]), static_cast<float> (child["y"]) },
-                                         juce::jlimit (0.125, 4.0, static_cast<double> (child.getProperty ("multiplier", 1.0))),
+                                         juce::jlimit (minDropSpeedMultiplier, maxDropSpeedMultiplier, static_cast<double> (child.getProperty ("multiplier", 1.0))),
                                          juce::jlimit (0.0, 1.0, static_cast<double> (child.getProperty ("affectProbability", 1.0))),
                                          static_cast<bool> (child.getProperty ("enabled", true)) });
                 destination.back().id = child.getProperty ("id", destination.back().id).toString();
@@ -4287,7 +4345,7 @@ private:
     static bool filtersFromValueTree (const juce::ValueTree& tree, std::vector<PipeFilter>& destination)
     {
         if (! tree.isValid()) return true; if (! tree.hasType ("pipeFilters")) return false;
-        for (const auto& child : tree) if (child.hasType ("filter")) { PipeFilter filter; filter.position = { static_cast<float> (child["x"]), static_cast<float> (child["y"]) }; filter.mode = static_cast<PipeFilter::Mode> (juce::jlimit (0, 2, static_cast<int> (child.getProperty ("mode", 1)))); filter.lowSpeed = juce::jlimit (0.125, 4.0, static_cast<double> (child.getProperty ("low", 0.5))); filter.highSpeed = juce::jlimit (filter.lowSpeed, 4.0, static_cast<double> (child.getProperty ("high", 1.5))); filter.enabled = static_cast<bool> (child.getProperty ("enabled", true)); filter.id = child.getProperty ("id", filter.id).toString(); destination.push_back (filter); }
+        for (const auto& child : tree) if (child.hasType ("filter")) { PipeFilter filter; filter.position = { static_cast<float> (child["x"]), static_cast<float> (child["y"]) }; filter.mode = static_cast<PipeFilter::Mode> (juce::jlimit (0, 2, static_cast<int> (child.getProperty ("mode", 1)))); filter.lowSpeed = juce::jlimit (minDropSpeedMultiplier, maxDropSpeedMultiplier, static_cast<double> (child.getProperty ("low", 0.5))); filter.highSpeed = juce::jlimit (filter.lowSpeed, maxDropSpeedMultiplier, static_cast<double> (child.getProperty ("high", 1.5))); filter.enabled = static_cast<bool> (child.getProperty ("enabled", true)); filter.id = child.getProperty ("id", filter.id).toString(); destination.push_back (filter); }
         return true;
     }
 
@@ -4330,7 +4388,7 @@ private:
             logic.comparison = static_cast<PipeLogic::Comparison> (juce::jlimit (0, 4, static_cast<int> (child.getProperty ("comparison", 3))));
             logic.branch = static_cast<PipeLogic::Branch> (juce::jlimit (0, 3, static_cast<int> (child.getProperty ("branch", 1))));
             logic.targetCount = juce::jlimit (1, 64, static_cast<int> (child.getProperty ("target", 4)));
-            logic.compareSpeed = juce::jlimit (0.125, 4.0, static_cast<double> (child.getProperty ("speed", 1.0)));
+            logic.compareSpeed = juce::jlimit (minDropSpeedMultiplier, maxDropSpeedMultiplier, static_cast<double> (child.getProperty ("speed", 1.0)));
             logic.coincidenceBeats = juce::jlimit (0.0625, 4.0, static_cast<double> (child.getProperty ("coincidence", 0.125)));
             logic.levelHoldBeats = juce::jlimit (0.0625, 8.0, static_cast<double> (child.getProperty ("levelHold", 0.25)));
             logic.orientation = static_cast<PipeLogic::Orientation> (juce::jlimit (0, 3, static_cast<int> (child.getProperty ("orientation", 0))));
@@ -6261,11 +6319,13 @@ private:
     static void addRoutePaintItem (std::vector<RoutePaintItem>& items,
                                    const RoadRoute& route,
                                    bool selected,
-                                   float alpha)
+                                   float alpha,
+                                   int routeIndex = -1)
     {
         auto& item = items.emplace_back();
         item.path = createPath (route);
         item.bounds = item.path.getBounds().expanded (12.0f);
+        item.routeIndex = routeIndex;
         item.selected = selected;
         item.pipe = route.isPipe;
         item.warpPipe = route.isWarpPipe;
@@ -6311,6 +6371,58 @@ private:
         if (item.bounds.isEmpty())
             return;
 
+        if (isMidinousTopLevelViewActive())
+        {
+            const auto baseColour = item.colour.isTransparent() ? pipeColourForIndex (juce::jmax (0, item.routeIndex))
+                                                                 : item.colour;
+            const auto active = item.routeIndex >= 0
+                             && std::any_of (flowPulses.begin(), flowPulses.end(), [&item] (const auto& pulse)
+                                { return pulse.routeIndex == item.routeIndex; });
+            const auto colour = (item.selected ? baseColour.brighter (0.28f) : baseColour)
+                                  .withMultipliedSaturation (1.18f);
+            const auto drawStroke = [&] (float width, juce::Colour strokeColour)
+            {
+                g.setColour (strokeColour);
+                if (item.warpPipe)
+                {
+                    const float dashes[] { 2.0f, 5.0f };
+                    juce::Path dashed;
+                    juce::PathStrokeType (width, juce::PathStrokeType::mitered, juce::PathStrokeType::square)
+                        .createDashedStroke (dashed, item.path, dashes, 2);
+                    g.fillPath (dashed);
+                }
+                else
+                {
+                    g.strokePath (item.path, juce::PathStrokeType (width,
+                                                                  juce::PathStrokeType::mitered,
+                                                                  juce::PathStrokeType::square));
+                }
+            };
+
+            if (layer == RouteLayer::shadow)
+            {
+                drawStroke (7.2f, juce::Colour (0xff03050a).withAlpha (0.78f * item.alpha));
+                return;
+            }
+
+            if (layer == RouteLayer::glow)
+            {
+                if (active || item.selected)
+                    drawStroke (active ? 7.0f : 5.8f,
+                                colour.withAlpha ((active ? 0.30f : 0.20f) * item.alpha));
+                return;
+            }
+
+            if (layer == RouteLayer::core)
+            {
+                drawStroke (item.selected ? 4.2f : 3.2f, colour.withAlpha (0.96f * item.alpha));
+                return;
+            }
+
+            drawStroke (0.8f, juce::Colours::white.withAlpha ((active ? 0.32f : 0.16f) * item.alpha));
+            return;
+        }
+
         const auto glowAlpha = item.selected ? 0.64f : 0.42f;
         const auto pipeColour = item.colour.isTransparent() ? pipeColourForIndex (0) : item.colour;
         const auto coreStart = item.pipe ? pipeColour : lineColour();
@@ -6318,7 +6430,7 @@ private:
 
         if (layer == RouteLayer::shadow)
         {
-            g.setColour (juce::Colour (0xff020807).withAlpha (0.58f * item.alpha));
+            g.setColour (juce::Colour (0xff101522).withAlpha ((isRainbowUiEnabled() ? 0.78f : 0.58f) * item.alpha));
             g.strokePath (item.path, juce::PathStrokeType (lineWidth + 5.5f, juce::PathStrokeType::mitered, juce::PathStrokeType::square));
             return;
         }
@@ -6352,6 +6464,47 @@ private:
 
         g.setColour (juce::Colours::white.withAlpha ((item.selected ? 0.34f : 0.20f) * item.alpha));
         g.strokePath (item.path, juce::PathStrokeType (1.0f, juce::PathStrokeType::mitered, juce::PathStrokeType::square));
+    }
+
+    void drawMidinousRouteDirectionMarkers (juce::Graphics& g) const
+    {
+        if (! isMidinousTopLevelViewActive())
+            return;
+
+        for (int routeIndex = 0; routeIndex < static_cast<int> (routes().size()); ++routeIndex)
+        {
+            const auto& route = routes()[static_cast<size_t> (routeIndex)];
+            if (route.points.size() < 2)
+                continue;
+
+            auto colour = route.colour.isTransparent() ? pipeColourForIndex (routeIndex) : route.colour;
+            colour = colour.withMultipliedSaturation (1.18f);
+            const auto source = route.points.front();
+            const auto target = route.points.back();
+            auto direction = target - route.points[route.points.size() - 2];
+            const auto length = direction.getDistanceFromOrigin();
+            if (length <= 0.001f)
+                continue;
+
+            direction /= length;
+            const auto normal = juce::Point<float> (-direction.y, direction.x);
+            const auto markerBase = target - direction * 7.0f;
+
+            g.setColour (juce::Colour (0xff080b12).withAlpha (0.92f));
+            g.fillRoundedRectangle (juce::Rectangle<float> (7.0f, 7.0f).withCentre (source), 1.5f);
+            g.setColour (colour.withAlpha (0.95f));
+            g.drawRoundedRectangle (juce::Rectangle<float> (7.0f, 7.0f).withCentre (source), 1.5f, 1.2f);
+
+            juce::Path arrow;
+            arrow.startNewSubPath (target + direction * 1.5f);
+            arrow.lineTo (markerBase + normal * 3.8f);
+            arrow.lineTo (markerBase - normal * 3.8f);
+            arrow.closeSubPath();
+            g.setColour (juce::Colour (0xff05070c).withAlpha (0.78f));
+            g.fillPath (arrow, juce::AffineTransform::scale (1.25f, 1.25f, target.x, target.y));
+            g.setColour (colour.brighter (0.16f).withAlpha (0.98f));
+            g.fillPath (arrow);
+        }
     }
 
     static juce::Point<float> pointAlongRoute (const RoadRoute& route, float distance)
@@ -6550,7 +6703,7 @@ private:
             case PipeLogic::Mode::comparator:
             {
                 constexpr double epsilon = 0.0001;
-                const auto compareSpeed = modulatedRatioValue (logic.compareSpeed, ModulationTargetKind::logic, logic.id, 1, 0.125, 4.0);
+                const auto compareSpeed = modulatedRatioValue (logic.compareSpeed, ModulationTargetKind::logic, logic.id, 1, minDropSpeedMultiplier, maxDropSpeedMultiplier);
                 if (logic.comparison == PipeLogic::Comparison::less) return result (pulse.speed < compareSpeed);
                 if (logic.comparison == PipeLogic::Comparison::lessOrEqual) return result (pulse.speed <= compareSpeed);
                 if (logic.comparison == PipeLogic::Comparison::equal) return result (std::abs (pulse.speed - compareSpeed) <= epsilon);
@@ -6934,10 +7087,10 @@ private:
                 const auto distance = distanceAlongRouteForPoint (routes()[static_cast<size_t> (hit.route)], tap.position);
                 const auto baseSpeed = tap.randomSpeed
                     ? juce::jmap (juce::Random::getSystemRandom().nextDouble(),
-                                  juce::jlimit (0.25, 4.0, tap.speedLow),
-                                  juce::jlimit (tap.speedLow, 4.0, tap.speedHigh))
-                    : juce::jlimit (0.25, 4.0, tap.speed);
-                const auto dropSpeed = modulatedRatioValue (baseSpeed, ModulationTargetKind::tap, tap.id, 1, 0.25, 4.0);
+                                  juce::jlimit (0.25, maxDropSpeedMultiplier, tap.speedLow),
+                                  juce::jlimit (tap.speedLow, maxDropSpeedMultiplier, tap.speedHigh))
+                    : juce::jlimit (0.25, maxDropSpeedMultiplier, tap.speed);
+                const auto dropSpeed = modulatedRatioValue (baseSpeed, ModulationTargetKind::tap, tap.id, 1, 0.25, maxDropSpeedMultiplier);
                 const auto dropChance = modulatedUnitValue (tap.probability, ModulationTargetKind::tap, tap.id, 0);
                 FlowPulse pulse;
                 pulse.routeIndex = hit.route;
@@ -7094,7 +7247,14 @@ private:
                 pulse.waitBeatsRemaining = juce::jmax (0.0, pulse.waitBeatsRemaining - elapsed * flowBpm / 60.0);
                 continue;
             }
-            advanceFlowPulse (pulse, advance * static_cast<float> (pulse.speed));
+            // Device contacts are point-tested after movement. Keep each visible
+            // simulation step shorter than a device's diameter and carry excess
+            // distance forward, so a delayed UI frame cannot jump over a device.
+            const auto requestedTravel = pulse.travelBacklog + advance * static_cast<float> (pulse.speed);
+            const auto safeTravel = gridSize * 0.35f;
+            const auto travelThisFrame = juce::jmin (requestedTravel, safeTravel);
+            pulse.travelBacklog = juce::jmax (0.0f, requestedTravel - travelThisFrame);
+            advanceFlowPulse (pulse, travelThisFrame);
             if (! juce::isPositiveAndBelow (pulse.routeIndex, static_cast<int> (routes().size()))) continue;
             const auto& route = routes()[static_cast<size_t> (pulse.routeIndex)];
             auto position = pointAlongRoute (route, pulse.distance);
@@ -7124,7 +7284,7 @@ private:
                 const auto& limit = pipeSpeedLimits()[static_cast<size_t> (hitSpeedLimit)];
                 if (juce::Random::getSystemRandom().nextDouble()
                     < modulatedUnitValue (limit.affectProbability, ModulationTargetKind::speedLimit, limit.id, 1))
-                    pulse.speed = modulatedRatioValue (limit.bpmMultiplier, ModulationTargetKind::speedLimit, limit.id, 0, 0.125, 4.0);
+                    pulse.speed = modulatedRatioValue (limit.bpmMultiplier, ModulationTargetKind::speedLimit, limit.id, 0, minDropSpeedMultiplier, maxDropSpeedMultiplier);
             }
             pulse.lastSpeedLimit = hitSpeedLimit;
 
@@ -7136,8 +7296,8 @@ private:
             if (hitFilter >= 0 && hitFilter != pulse.lastFilter)
             {
                 const auto& filter = pipeFilters()[static_cast<size_t> (hitFilter)];
-                const auto low = modulatedRatioValue (filter.lowSpeed, ModulationTargetKind::filter, filter.id, 0, 0.125, 4.0);
-                const auto high = modulatedRatioValue (filter.highSpeed, ModulationTargetKind::filter, filter.id, 1, low, 4.0);
+                const auto low = modulatedRatioValue (filter.lowSpeed, ModulationTargetKind::filter, filter.id, 0, minDropSpeedMultiplier, maxDropSpeedMultiplier);
+                const auto high = modulatedRatioValue (filter.highSpeed, ModulationTargetKind::filter, filter.id, 1, low, maxDropSpeedMultiplier);
                 const auto passes = filter.mode == PipeFilter::Mode::highpass ? pulse.speed >= low
                                   : filter.mode == PipeFilter::Mode::lowpass ? pulse.speed <= high
                                   : pulse.speed >= low && pulse.speed <= high;
@@ -7318,6 +7478,11 @@ private:
         for (const auto& trace : logicSignalTraces)
         {
             const auto alpha = static_cast<float> (juce::jlimit (0.0, 1.0, (trace.expiresMs - now) / 420.0));
+            if (isRainbowUiEnabled())
+            {
+                g.setColour (juce::Colour (0xff101522).withAlpha (alpha * 0.72f));
+                g.drawLine ({ trace.from, trace.to }, juce::jmax (3.8f, gridSize * 0.12f));
+            }
             g.setColour (juce::Colour (0xff39f58a).withAlpha (alpha * 0.75f));
             g.drawLine ({ trace.from, trace.to }, juce::jmax (2.0f, gridSize * 0.08f));
         }
@@ -7342,11 +7507,55 @@ private:
         {
             const auto& pulse = flowPulses[static_cast<size_t> (pulseIndex)];
             if (! juce::isPositiveAndBelow (pulse.routeIndex, static_cast<int> (routes().size()))) continue;
-            const auto position = pointAlongRoute (routes()[static_cast<size_t> (pulse.routeIndex)], pulse.distance);
-            g.setColour (juce::Colour (0xffb9ffe8).withAlpha (0.22f));
-            g.fillEllipse (juce::Rectangle<float> (18.0f, 18.0f).withCentre (position));
-            g.setColour (juce::Colour (0xff62f2c7));
-            g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre (position));
+            const auto& pulseRoute = routes()[static_cast<size_t> (pulse.routeIndex)];
+            const auto position = pointAlongRoute (pulseRoute, pulse.distance);
+            if (isMidinousTopLevelViewActive())
+            {
+                auto colour = pulseRoute.colour.isTransparent() ? pipeColourForIndex (pulse.routeIndex)
+                                                                 : pulseRoute.colour;
+                colour = colour.withMultipliedSaturation (1.22f).brighter (0.08f);
+                const auto signedStep = pulse.reverse ? -10.0f : 10.0f;
+                const auto ahead = pointAlongRoute (pulseRoute, juce::jlimit (0.0f, pulseRoute.getLength(),
+                                                                             pulse.distance + signedStep));
+                const auto behind = pointAlongRoute (pulseRoute, juce::jlimit (0.0f, pulseRoute.getLength(),
+                                                                              pulse.distance - signedStep * 0.72f));
+                auto heading = ahead - position;
+                const auto headingLength = heading.getDistanceFromOrigin();
+                if (headingLength > 0.001f)
+                    heading /= headingLength;
+                else
+                    heading = { pulse.reverse ? -1.0f : 1.0f, 0.0f };
+                const auto normal = juce::Point<float> (-heading.y, heading.x);
+
+                g.setColour (colour.withAlpha (0.26f));
+                g.drawLine ({ behind, position }, 5.0f);
+                g.setColour (colour.withAlpha (0.18f));
+                g.fillEllipse (juce::Rectangle<float> (20.0f, 20.0f).withCentre (position));
+
+                juce::Path traveller;
+                traveller.startNewSubPath (position + heading * 6.0f);
+                traveller.lineTo (position - heading * 4.8f + normal * 4.4f);
+                traveller.lineTo (position - heading * 4.8f - normal * 4.4f);
+                traveller.closeSubPath();
+                g.setColour (juce::Colour (0xff080b11).withAlpha (0.88f));
+                g.fillPath (traveller, juce::AffineTransform::scale (1.28f, 1.28f, position.x, position.y));
+                g.setColour (colour.withAlpha (0.98f));
+                g.fillPath (traveller);
+                g.setColour (juce::Colours::white.withAlpha (0.46f));
+                g.drawLine ({ position - heading * 1.0f, position + heading * 3.5f }, 0.9f);
+            }
+            else
+            {
+                g.setColour (juce::Colour (0xffb9ffe8).withAlpha (0.22f));
+                g.fillEllipse (juce::Rectangle<float> (18.0f, 18.0f).withCentre (position));
+                g.setColour (juce::Colour (0xff62f2c7));
+                g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre (position));
+                if (isRainbowUiEnabled())
+                {
+                    g.setColour (juce::Colour (0xff101522).withAlpha (0.90f));
+                    g.drawEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre (position), 1.2f);
+                }
+            }
             const auto isSelected = pulseIndex == selectedFlowPulse;
             if (isSelected)
             {
@@ -7423,6 +7632,7 @@ private:
                     clone.distance = distances[static_cast<size_t> (node)];
                     clone.reverse = adjacent < node;
                     clone.lastCloner = -1;
+                    clone.travelBacklog = 0.0f;
                     const auto direction = route.points[static_cast<size_t> (adjacent)] - route.points[static_cast<size_t> (node)];
                     candidates.push_back ({ clone, direction });
                 }
@@ -7441,6 +7651,7 @@ private:
                 clone.distance = distance;
                 clone.reverse = reverse;
                 clone.lastCloner = -1;
+                clone.travelBacklog = 0.0f;
                 candidates.push_back ({ clone, reverse ? before - cloner.position : after - cloner.position });
             }
         }
@@ -7500,6 +7711,12 @@ private:
 
     void drawDisc (juce::Graphics& g, const Disc& disc, bool selected, bool flashing) const
     {
+        if (isMidinousTopLevelViewActive())
+        {
+            drawMidinousDisc (g, disc, selected, flashing);
+            return;
+        }
+
         const auto diameter = compactDiscs ? gridSize * 0.55f : gridSize;
         const auto scale = diameter / gridSize;
         const auto area = juce::Rectangle<float> (diameter, diameter).withCentre (disc.centre);
@@ -7522,8 +7739,8 @@ private:
         g.setGradientFill (rimFill);
         g.fillEllipse (rim);
 
-        g.setColour (juce::Colour (0xff020807).withAlpha (0.38f));
-        g.drawEllipse (rim, 1.0f);
+        g.setColour (juce::Colour (0xff101522).withAlpha (isRainbowUiEnabled() ? 0.84f : 0.38f));
+        g.drawEllipse (rim, isRainbowUiEnabled() ? 1.35f : 1.0f);
 
         juce::ColourGradient fill (discHotColour(), face.getTopLeft() + juce::Point<float> (3.0f, 2.0f),
                                    discCoolColour().withMultipliedSaturation (0.88f), face.getBottomRight(), true);
@@ -7542,6 +7759,57 @@ private:
         g.setColour (juce::Colour (0xff080c0a).withAlpha (0.82f));
         g.drawEllipse (face, selected ? juce::jmax (1.0f, 1.7f * scale)
                                       : juce::jmax (0.7f, scale));
+
+        drawDiscOrbit (g, area, disc, selected);
+        drawDiscElementSatellites (g, area, disc, selected);
+        drawDiscElementBadge (g, area, disc);
+    }
+
+    void drawMidinousDisc (juce::Graphics& g, const Disc& disc, bool selected, bool flashing) const
+    {
+        const auto diameter = compactDiscs ? gridSize * 0.55f : gridSize;
+        const auto scale = diameter / gridSize;
+        const auto area = juce::Rectangle<float> (diameter, diameter).withCentre (disc.centre);
+        const auto tile = area.expanded (3.0f * scale);
+        const auto colour = flashing ? juce::Colour (0xffffd95a)
+                                     : discHotColour().withMultipliedSaturation (1.24f);
+
+        if (selected || flashing)
+        {
+            g.setColour ((flashing ? juce::Colour (0xffffd95a) : accentColour()).withAlpha (flashing ? 0.30f : 0.18f));
+            g.fillRoundedRectangle (tile.expanded (7.0f * scale), 5.0f * scale);
+        }
+
+        g.setColour (juce::Colour (0xff05070c).withAlpha (0.88f));
+        g.fillRoundedRectangle (tile.translated (1.2f * scale, 1.8f * scale), 3.5f * scale);
+        g.setColour (juce::Colour (0xff171d27));
+        g.fillRoundedRectangle (tile, 3.5f * scale);
+        g.setColour ((selected ? accentColour() : discCoolColour()).withAlpha (selected ? 0.96f : 0.76f));
+        g.drawRoundedRectangle (tile, 3.5f * scale, juce::jmax (0.9f, (selected ? 1.8f : 1.15f) * scale));
+
+        g.setColour (colour.withAlpha (0.20f));
+        g.fillEllipse (area.expanded (2.0f * scale));
+        g.setColour (colour.withAlpha (flashing ? 1.0f : 0.94f));
+        g.drawEllipse (area.reduced (1.2f * scale), juce::jmax (1.0f, 2.0f * scale));
+        g.setColour (juce::Colour (0xff090d14));
+        g.fillEllipse (area.reduced (4.0f * scale));
+        g.setColour (colour.brighter (0.18f).withAlpha (flashing ? 1.0f : 0.94f));
+        g.fillEllipse (area.reduced (7.0f * scale));
+        g.setColour (juce::Colours::white.withAlpha (0.48f));
+        g.fillEllipse (area.reduced (9.0f * scale)
+                           .withSizeKeepingCentre (juce::jmax (2.0f, 4.2f * scale),
+                                                   juce::jmax (2.0f, 4.2f * scale)));
+
+        if (selected)
+        {
+            const auto corner = 5.0f * scale;
+            const auto stroke = juce::jmax (0.8f, 1.2f * scale);
+            g.setColour (juce::Colours::white.withAlpha (0.72f));
+            g.drawLine ({ tile.getX(), tile.getY() + corner, tile.getX(), tile.getY() }, stroke);
+            g.drawLine ({ tile.getX(), tile.getY(), tile.getX() + corner, tile.getY() }, stroke);
+            g.drawLine ({ tile.getRight() - corner, tile.getBottom(), tile.getRight(), tile.getBottom() }, stroke);
+            g.drawLine ({ tile.getRight(), tile.getBottom(), tile.getRight(), tile.getBottom() - corner }, stroke);
+        }
 
         drawDiscOrbit (g, area, disc, selected);
         drawDiscElementSatellites (g, area, disc, selected);
@@ -7572,8 +7840,11 @@ private:
 
         const auto centre = discArea.getCentre();
         const auto ringCount = getDiscOrbitRingCount (elementCount);
-        const auto orbitColour = selected ? accentColour().brighter (0.12f)
-                                          : discRimColour().interpolatedWith (soundElementColour(), 0.32f);
+        const auto orbitColour = isRainbowUiEnabled()
+                                   ? (selected ? juce::Colour (0xff1746ff)
+                                               : juce::Colour (0xff007a50))
+                                   : (selected ? accentColour().brighter (0.12f)
+                                               : discRimColour().interpolatedWith (soundElementColour(), 0.32f));
         const auto alpha = orbitVisualAlpha();
 
         for (int ring = 0; ring < ringCount; ++ring)
@@ -7581,10 +7852,15 @@ private:
             const auto radius = discOrbitRadius (discArea) + static_cast<float> (ring) * discOrbitRingSpacing;
             const auto orbitArea = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);
 
-            g.setColour (orbitColour.withAlpha (alpha * (selected ? 0.13f : 0.08f) / static_cast<float> (ring + 1)));
+            const auto haloAlpha = isRainbowUiEnabled() ? (selected ? 0.20f : 0.14f)
+                                                        : (selected ? 0.13f : 0.08f);
+            const auto lineAlpha = isRainbowUiEnabled() ? (selected ? 0.82f : 0.72f)
+                                                        : (selected ? 0.46f : 0.30f);
+            g.setColour (orbitColour.withAlpha (alpha * haloAlpha / static_cast<float> (ring + 1)));
             g.drawEllipse (orbitArea.expanded (2.2f), 0.55f);
-            g.setColour (orbitColour.withAlpha (alpha * (selected ? 0.46f : 0.30f) / static_cast<float> (ring + 1)));
-            g.drawEllipse (orbitArea, selected ? 0.95f : 0.70f);
+            g.setColour (orbitColour.withAlpha (alpha * lineAlpha / static_cast<float> (ring + 1)));
+            g.drawEllipse (orbitArea, selected ? (isRainbowUiEnabled() ? 1.35f : 1.05f)
+                                               : (isRainbowUiEnabled() ? 1.15f : 0.70f));
         }
     }
 
@@ -7662,8 +7938,8 @@ private:
             g.fillEllipse (satellite.withSizeKeepingCentre (satelliteSize * 0.34f, satelliteSize * 0.26f)
                                 .translated (-satelliteSize * 0.16f, -satelliteSize * 0.18f));
 
-            g.setColour (juce::Colour (0xff050807).withAlpha (0.56f * alpha));
-            g.drawEllipse (satellite, 0.85f);
+            g.setColour (juce::Colour (0xff101522).withAlpha ((isRainbowUiEnabled() ? 0.88f : 0.56f) * alpha));
+            g.drawEllipse (satellite, isRainbowUiEnabled() ? 1.15f : 0.85f);
         }
     }
 
@@ -7808,10 +8084,23 @@ private:
                 const auto radius = selected && nodeIndex == selectedNode ? nodeRadius + 2.0f : nodeRadius;
                 const auto area = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (point);
 
+                if (isMidinousTopLevelViewActive())
+                {
+                    const auto colour = route.colour.isTransparent() ? pipeColourForIndex (routeIndex) : route.colour;
+                    const auto square = area.withSizeKeepingCentre (radius * 1.7f, radius * 1.7f);
+                    g.setColour (juce::Colour (0xff06080d));
+                    g.fillRoundedRectangle (square.expanded (1.5f), 1.5f);
+                    g.setColour ((selected ? juce::Colours::white : colour).withAlpha (0.96f));
+                    g.fillRoundedRectangle (square, 1.2f);
+                    g.setColour (juce::Colour (0xff171d27));
+                    g.drawRoundedRectangle (square, 1.2f, 1.0f);
+                    continue;
+                }
+
                 g.setColour (selected ? juce::Colour (0xfff0c05a) : juce::Colour (0xffdce7df));
                 g.fillEllipse (area);
                 g.setColour (juce::Colour (0xff171b18));
-                g.drawEllipse (area, 1.4f);
+                g.drawEllipse (area, isRainbowUiEnabled() ? 2.0f : 1.4f);
             }
         }
     }
@@ -7819,6 +8108,29 @@ private:
     void drawBackground (juce::Graphics& g) const
     {
         const auto bounds = getLocalBounds().toFloat();
+        if (isMidinousTopLevelViewActive())
+        {
+            g.fillAll (juce::Colour (0xff10141b));
+            drawGrid (g, gridSize, juce::Colour (0xff222a36).withAlpha (0.72f),
+                      static_cast<float> (getWidth()), static_cast<float> (getHeight()));
+            drawGrid (g, gridSize * 4.0f, juce::Colour (0xff344052).withAlpha (0.82f),
+                      static_cast<float> (getWidth()), static_cast<float> (getHeight()));
+
+            const auto scaledSpacing = gridSize * viewScale;
+            if (scaledSpacing >= 11.0f)
+            {
+                auto firstX = std::fmod (viewOffset.x, scaledSpacing);
+                auto firstY = std::fmod (viewOffset.y, scaledSpacing);
+                if (firstX > 0.0f) firstX -= scaledSpacing;
+                if (firstY > 0.0f) firstY -= scaledSpacing;
+                g.setColour (juce::Colour (0xff718198).withAlpha (0.30f));
+                for (float x = firstX; x <= bounds.getRight(); x += scaledSpacing)
+                    for (float y = firstY; y <= bounds.getBottom(); y += scaledSpacing)
+                        g.fillRect (juce::Rectangle<float> (1.4f, 1.4f).withCentre ({ x, y }));
+            }
+            return;
+        }
+
         juce::ColourGradient gradient (backgroundTop(), bounds.getTopLeft(),
                                        backgroundBottom(), bounds.getBottomRight(), false);
         g.setGradientFill (gradient);
@@ -7829,6 +8141,27 @@ private:
 
         drawGrid (g, gridSize, gridMinorColour(), static_cast<float> (width), static_cast<float> (height));
         drawGrid (g, gridSize * 4.0f, gridMajorColour(), static_cast<float> (width), static_cast<float> (height));
+    }
+
+    void drawMidinousWorkspaceFeedback (juce::Graphics& g) const
+    {
+        if (! isMidinousTopLevelViewActive())
+            return;
+
+        const auto bar = getLocalBounds().toFloat().removeFromBottom (24.0f);
+        g.setColour (juce::Colour (0xff0a0d13).withAlpha (0.90f));
+        g.fillRect (bar);
+        g.setColour (juce::Colour (0xff3c485b).withAlpha (0.82f));
+        g.drawHorizontalLine (static_cast<int> (bar.getY()), bar.getX(), bar.getRight());
+        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.setColour (juce::Colour (0xffb7c1cf));
+        g.drawText ("ROOT  /  " + juce::String (routes().size()) + " PATHS  /  "
+                        + juce::String (discs().size()) + " POINTS",
+                    bar.reduced (12.0f, 2.0f), juce::Justification::centredLeft, false);
+        g.setColour (juce::Colour (0xff79d9ff));
+        g.drawText (juce::String (flowPulses.size()) + " TRAVELLERS   /   ZOOM "
+                        + juce::String (juce::roundToInt (viewScale * 100.0f)) + "%",
+                    bar.reduced (12.0f, 2.0f), juce::Justification::centredRight, false);
     }
 
     void drawGrid (juce::Graphics& g, float spacing, juce::Colour colour, float width, float height) const
@@ -11952,13 +12285,15 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (appBackground());
+        const auto midinousChrome = canvas.isMidinousTopLevelViewActive();
+        g.fillAll (midinousChrome ? juce::Colour (0xff0c1016) : appBackground());
 
         const auto toolbar = getLocalBounds().removeFromTop (toolbarHeight).toFloat();
-        g.setColour (surfaceColour());
+        g.setColour (midinousChrome ? juce::Colour (0xff171c24) : surfaceColour());
         g.fillRect (toolbar);
 
-        g.setColour (subtleStroke().withAlpha (0.72f));
+        g.setColour (midinousChrome ? juce::Colour (0xff42bde8).withAlpha (0.48f)
+                                   : subtleStroke().withAlpha (0.72f));
         g.drawHorizontalLine (toolbarHeight - 1, 0.0f, static_cast<float> (getWidth()));
 
         if (isRainbowUiEnabled())
@@ -11977,9 +12312,10 @@ public:
         if (! transportBarBounds.isEmpty())
         {
             const auto transport = transportBarBounds.toFloat();
-            g.setColour (appBackground().withAlpha (0.72f));
+            g.setColour ((midinousChrome ? juce::Colour (0xff0c1016) : appBackground()).withAlpha (0.82f));
             g.fillRoundedRectangle (transport, 7.0f);
-            g.setColour (subtleStroke().withAlpha (0.68f));
+            g.setColour (midinousChrome ? juce::Colour (0xff39465a).withAlpha (0.86f)
+                                       : subtleStroke().withAlpha (0.68f));
             g.drawRoundedRectangle (transport.reduced (0.5f), 7.0f, 1.0f);
             if (transportSeparatorX > 0)
                 g.drawVerticalLine (transportSeparatorX, transport.getY() + 7.0f, transport.getBottom() - 7.0f);
@@ -11988,9 +12324,10 @@ public:
         if (! masterOutputBounds.isEmpty())
         {
             const auto output = masterOutputBounds.toFloat();
-            g.setColour (appBackground().withAlpha (0.72f));
+            g.setColour ((midinousChrome ? juce::Colour (0xff0c1016) : appBackground()).withAlpha (0.82f));
             g.fillRoundedRectangle (output, 7.0f);
-            g.setColour (subtleStroke().withAlpha (0.68f));
+            g.setColour (midinousChrome ? juce::Colour (0xff39465a).withAlpha (0.86f)
+                                       : subtleStroke().withAlpha (0.68f));
             g.drawRoundedRectangle (output.reduced (0.5f), 7.0f, 1.0f);
         }
 
@@ -12342,6 +12679,7 @@ public:
         }
         else if (index == 2)
         {
+            menu.addItem (menuMidinousTopLevelView, "Midinous-style top level UI", true, midinousTopLevelView);
             menu.addItem (menuRainbowUi, "Rainbow UI", true, rainbowMode);
             menu.addSeparator();
             menu.addItem (menuMixer, "Mixer\tCmd+M");
@@ -12394,8 +12732,23 @@ public:
         else if (itemId == menuClear) { canvas.clear(); updateStatus(); }
         else if (itemId == menuMixer) openMixerWindow();
         else if (itemId == menuClocks) openClockSettings();
+        else if (itemId == menuMidinousTopLevelView)
+        {
+            midinousTopLevelView = ! midinousTopLevelView;
+            if (midinousTopLevelView && rainbowMode)
+                applyUiTheme (false);
+            canvas.setMidinousTopLevelView (midinousTopLevelView);
+            markProjectDirty();
+            menuItemsChanged();
+            repaint();
+        }
         else if (itemId == menuRainbowUi)
         {
+            if (! rainbowMode)
+            {
+                midinousTopLevelView = false;
+                canvas.setMidinousTopLevelView (false);
+            }
             applyUiTheme (! rainbowMode);
             markProjectDirty();
             menuItemsChanged();
@@ -12496,7 +12849,7 @@ private:
                 button->setColour (juce::TextButton::buttonOnColourId, accentColour());
                 button->setColour (juce::TextButton::textColourOffId, textPrimary());
                 button->setColour (juce::TextButton::textColourOnId,
-                                   rainbowMode ? juce::Colours::white : appBackground());
+                                   contrastingForeground (accentColour()));
             }
             if (auto* toggle = dynamic_cast<juce::ToggleButton*> (&component))
             {
@@ -12557,6 +12910,10 @@ private:
         layersMainButton.setColour (juce::TextButton::buttonOnColourId, accentColour());
         layersModulationButton.setColour (juce::TextButton::buttonOnColourId,
                                           rainbowMode ? juce::Colour (0xffa100ff) : juce::Colour (0xffa96de8));
+        layersMainButton.setColour (juce::TextButton::textColourOnId,
+                                    contrastingForeground (layersMainButton.findColour (juce::TextButton::buttonOnColourId)));
+        layersModulationButton.setColour (juce::TextButton::textColourOnId,
+                                          contrastingForeground (layersModulationButton.findColour (juce::TextButton::buttonOnColourId)));
 
         if (rainbowMode)
         {
@@ -12564,16 +12921,21 @@ private:
             pauseButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffffb300));
             stopButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffff1744));
             clockButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff7c00ff));
-            flowButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-            pauseButton.setColour (juce::TextButton::textColourOffId, juce::Colour (0xff101522));
-            stopButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
-            clockButton.setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+            flowButton.setColour (juce::TextButton::textColourOffId,
+                                  contrastingForeground (flowButton.findColour (juce::TextButton::buttonColourId)));
+            pauseButton.setColour (juce::TextButton::textColourOffId,
+                                   contrastingForeground (pauseButton.findColour (juce::TextButton::buttonColourId)));
+            stopButton.setColour (juce::TextButton::textColourOffId,
+                                  contrastingForeground (stopButton.findColour (juce::TextButton::buttonColourId)));
+            clockButton.setColour (juce::TextButton::textColourOffId,
+                                   contrastingForeground (clockButton.findColour (juce::TextButton::buttonColourId)));
         }
 
         minimalLookAndFeel.setColour (juce::PopupMenu::backgroundColourId, surfaceColour());
         minimalLookAndFeel.setColour (juce::PopupMenu::textColourId, textPrimary());
         minimalLookAndFeel.setColour (juce::PopupMenu::highlightedBackgroundColourId, accentColour());
-        minimalLookAndFeel.setColour (juce::PopupMenu::highlightedTextColourId, juce::Colours::white);
+        minimalLookAndFeel.setColour (juce::PopupMenu::highlightedTextColourId,
+                                      contrastingForeground (accentColour()));
         minimalLookAndFeel.setColour (juce::TooltipWindow::backgroundColourId, surfaceColour());
         minimalLookAndFeel.setColour (juce::TooltipWindow::textColourId, textPrimary());
         minimalLookAndFeel.setColour (juce::TooltipWindow::outlineColourId, subtleStroke());
@@ -12591,7 +12953,8 @@ private:
     }
 
     enum { menuNewProject = 10001, menuOpenProject, menuSaveProject, menuSaveProjectAs, menuRecordWav, menuClose,
-           menuUndo, menuRedo, menuCopy, menuPaste, menuDuplicate, menuSaveAssembly, menuToggleBypass, menuClear, menuRainbowUi, menuMixer, menuClocks,
+           menuUndo, menuRedo, menuCopy, menuPaste, menuDuplicate, menuSaveAssembly, menuToggleBypass, menuClear,
+           menuMidinousTopLevelView, menuRainbowUi, menuMixer, menuClocks,
            menuDimOrbitElements, menuCompactDiscs, menuFlowDebug, menuAudioDiagnostics, menuPerformanceDiagnostics,
            menuPerformanceStress, menuAudioSettings, menuRevealRecording };
     static constexpr int menuAbout = 10100;
@@ -12864,6 +13227,7 @@ private:
     int transportSeparatorX = 0;
     bool transportRunning = false;
     bool rainbowMode = false;
+    bool midinousTopLevelView = false;
     bool orbitElementsDimmed = false;
     bool compactDiscs = false;
     bool flowDebugVisible = false;
@@ -13676,6 +14040,7 @@ private:
         layersPanelBackground.setAccent (modulation ? juce::Colour (0xffa96de8) : accentColour());
         if (visibilityChanged)
             resized();
+        repaint();
     }
 
     void exitToRootWorld()
@@ -15181,7 +15546,11 @@ private:
         setGlobalTempoPreservingTransportBeat (static_cast<double> (project.getProperty ("globalTempo", 120.0)));
         gridUnitChoice = juce::jlimit (1, 8, static_cast<int> (project.getProperty ("gridUnit", 5)));
         triggerQuantizeChoice = juce::jlimit (0, 5, static_cast<int> (project.getProperty ("triggerQuantize", 0)));
-        applyUiTheme (static_cast<bool> (project.getProperty ("rainbowUi", false)));
+        midinousTopLevelView = static_cast<bool> (project.getProperty ("midinousTopLevelUi", false));
+        const auto projectRainbowMode = static_cast<bool> (project.getProperty ("rainbowUi", false))
+                                     && ! midinousTopLevelView;
+        applyUiTheme (projectRainbowMode);
+        canvas.setMidinousTopLevelView (midinousTopLevelView);
         tempoEditor.setText (juce::String (globalTempoBpm, globalTempoBpm == std::round (globalTempoBpm) ? 0 : 1), false);
         gridUnitBox.setSelectedId (gridUnitChoice, juce::dontSendNotification);
         triggerQuantizeSlider.setValue (triggerQuantizeChoice, juce::dontSendNotification);
@@ -15283,6 +15652,7 @@ private:
         project.setProperty ("gridUnit", gridUnitChoice, nullptr);
         project.setProperty ("triggerQuantize", triggerQuantizeChoice, nullptr);
         project.setProperty ("masterGain", masterGain.load(), nullptr);
+        project.setProperty ("midinousTopLevelUi", midinousTopLevelView, nullptr);
         project.setProperty ("rainbowUi", rainbowMode, nullptr);
         project.addChild (createArrangementState (arrangementScenes), -1, nullptr);
         const auto xml = project.createXml();
@@ -15389,7 +15759,7 @@ class BlendingsApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override       { return "Blendings"; }
-    const juce::String getApplicationVersion() override    { return "0.7.14"; }
+    const juce::String getApplicationVersion() override    { return "0.7.15"; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
     void initialise (const juce::String& commandLine) override
@@ -15735,6 +16105,53 @@ int main (int argc, char** argv)
     {
         std::fprintf (stderr, "Playback smoke: nested elements were not traversed\n");
         return 10;
+    }
+
+    auto highSpeedState = savedState.createCopy();
+    auto highSpeedTaps = highSpeedState.getChildWithName ("pipeTaps");
+    for (auto tap : highSpeedTaps)
+    {
+        if (! tap.hasType ("tap")) continue;
+        const auto speed = static_cast<double> (tap.getProperty ("speed", 1.0));
+        const auto speedLow = static_cast<double> (tap.getProperty ("speedLow", speed));
+        const auto speedHigh = static_cast<double> (tap.getProperty ("speedHigh", speed));
+        tap.setProperty ("speed", juce::jmin (maxDropSpeedMultiplier, speed * 4.0), nullptr);
+        tap.setProperty ("speedLow", juce::jmin (maxDropSpeedMultiplier, speedLow * 4.0), nullptr);
+        tap.setProperty ("speedHigh", juce::jmin (maxDropSpeedMultiplier, speedHigh * 4.0), nullptr);
+        tap.setProperty ("probability", 1.0, nullptr);
+    }
+
+    RoadCanvas highSpeedCanvas;
+    if (! highSpeedCanvas.applyProjectState (highSpeedState))
+    {
+        std::fprintf (stderr, "Playback smoke: 4x-speed project did not load\n");
+        return 15;
+    }
+    int highSpeedTriggers = 0;
+    highSpeedCanvas.onDiscFlowTriggered = [&] (int) { ++highSpeedTriggers; };
+    highSpeedCanvas.setFlowTiming (120.0, 1.0);
+    highSpeedCanvas.setPerformanceStressMode (true);
+    highSpeedCanvas.resetFlowToStart();
+    highSpeedCanvas.setFlowRunning (true);
+    float maximumTravelBacklog = 0.0f;
+    int highSpeedMaximumDrops = 0;
+    for (int step = 0; step < 3600; ++step)
+    {
+        highSpeedCanvas.advanceFlowForTesting (1.0 / 60.0);
+        const auto snapshot = highSpeedCanvas.getPerformanceSnapshot();
+        maximumTravelBacklog = juce::jmax (maximumTravelBacklog, snapshot.maxTravelBacklog);
+        highSpeedMaximumDrops = juce::jmax (highSpeedMaximumDrops, snapshot.drops);
+        if (! std::isfinite (snapshot.flowUpdateMs) || snapshot.flowUpdateMs > 50.0 || snapshot.drops > 2048)
+        {
+            std::fprintf (stderr, "Playback smoke: unstable 4x-speed flow state\n");
+            return 16;
+        }
+    }
+    if (highSpeedTriggers < 2 || maximumTravelBacklog > gridSize * 0.05f)
+    {
+        std::fprintf (stderr, "Playback smoke: 4x-speed flow missed triggers or accumulated travel (triggers=%d backlog=%.3f drops=%d)\n",
+                      highSpeedTriggers, maximumTravelBacklog, highSpeedMaximumDrops);
+        return 17;
     }
 
     ScDiscAudioEngine audio;
